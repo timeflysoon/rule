@@ -5,8 +5,8 @@ on:
     paths:
       - 'cn_domain-extra.list'
   schedule:
-    - cron: '0 3 * * *'          # 每天 UTC 3:00（北京时间 11:00）自动跑一次
-  workflow_dispatch:             # 支持手动触发
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   convert:
@@ -14,49 +14,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 下载最新 Clash Meta 内核（一锤定音：硬编码稳定版 + API fallback）
+      - name: 下载 Clash Meta 内核（永不 404 版）
         run: |
-          # 优先用已知稳定版（v1.19.17，amd64 命名，永不过期）
           URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.17/mihomo-linux-amd64-v1.19.17.gz"
-          FILENAME="mihomo-linux-amd64-v1.19.17.gz"
-          
-          echo "正在下载稳定版: $URL"
-          wget -q "$URL"
-          
-          if [ ! -f "$FILENAME" ]; then
-            echo "稳定版下载失败，fallback 到 API 抓其他 amd64 gz"
-            # API fallback：抓所有 amd64 .gz，优先 v1 系列
-            ASSETS=$(curl -s https://api.github.com/repos/MetaCubeX/mihomo/releases/latest | jq -r '.assets[] | select(.name | contains("linux") and contains("amd64") and endswith(".gz")) | .browser_download_url')
-            URL=$(echo "$ASSETS" | grep -i "v1" | head -1 || echo "$ASSETS" | head -1)
-            if [ -n "$URL" ]; then
-              echo "Fallback URL: $URL"
-              wget -q "$URL"
-              FILENAME=$(basename "$URL")
-            else
-              echo "❌ 没有找到任何 Linux amd64 gz 文件，退出"
-              exit 1
-            fi
-          fi
-          
+          wget -q "$URL" || wget -q "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.17/mihomo-linux-amd64-compatible-v1.19.17.gz"
+          FILENAME=$(ls *.gz)
           gzip -d "$FILENAME"
           chmod +x "${FILENAME%.gz}"
           mv "${FILENAME%.gz}" clash_meta
-          echo "✅ Clash Meta 下载完成: $FILENAME"
+          echo "Clash Meta 下载完成"
 
-      - name: 转换 list → mrs（官方 convert-ruleset 命令）
+      - name: 生成 cn_domain-extra.mrs
         run: |
           ./clash_meta convert-ruleset domain text cn_domain-extra.list cn_domain-extra.mrs
-          echo "✅ 转换完成，mrs 文件大小: $(wc -l < cn_domain-extra.mrs) 行"
+          echo "转换完成，共 $(wc -l < cn_domain-extra.mrs) 行"
 
-      - name: 提交生成的 mrs 文件
+      - name: 强制提交 mrs 文件到仓库
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cn_domain-extra.mrs
-          if git diff --quiet; then
-            echo "无变化，跳过提交"
-          else
-            git commit -m "chore: auto update cn_domain-extra.mrs $(date -u +%Y-%m-%d\ %H:%M\ UTC)"
-            git push
-            echo "✅ 提交成功"
-          fi
+          git add -f cn_domain-extra.mrs
+          git commit -m "chore: auto update cn_domain-extra.mrs $(date -u +%Y-%m-%d\ %H:%M)" || echo "nothing to commit"
+          git push origin main
+          echo "mrs 已强制推送到仓库根目录"
