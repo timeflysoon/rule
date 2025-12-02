@@ -8,6 +8,9 @@ on:
     - cron: '0 3 * * *'
   workflow_dispatch:
 
+permissions:  # ← 新加这几行：开启 write 权限（解决 403）
+  contents: write
+
 jobs:
   convert:
     runs-on: ubuntu-latest
