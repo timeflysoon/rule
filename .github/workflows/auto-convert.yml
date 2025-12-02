@@ -1,4 +1,4 @@
-name: 更新 mrs（终极无敌版 - commit 消息完美修复）
+name: 更新 mrs（永不翻车终极版）
 
 on:
   workflow_dispatch:
@@ -51,9 +51,7 @@ jobs:
             list: apple.list
             mrs: apple.mrs
 
-    if: >
-      github.event.inputs.target == 'all' || 
-      github.event.inputs.target == '${{ matrix.rule }}'
+    if: github.event.inputs.target == 'all' || github.event.inputs.target == '${{ matrix.rule }}'
 
     steps:
       - uses: actions/checkout@v4
@@ -69,28 +67,50 @@ jobs:
             echo "正在转换 ${{ matrix.list }} → ${{ matrix.mrs }}"
             ./clash_meta convert-ruleset domain text "${{ matrix.list }}" "${{ matrix.mrs }}"
             echo "converted=true" >> $GITHUB_OUTPUT
+            echo "file=${{ matrix.mrs }}" >> $GITHUB_OUTPUT
           else
-            echo "跳过：${{ matrix.list }} 不存在"
+          echo "跳过：${{ matrix.list }} 不存在"
           fi
 
-      # 终极修复：用 GIT_COMMITTER_NAME/EMAIL + -c core.hooksPath=none 强制生效
-      - name: 提交（100% 显示正确 commit 消息）
+      # 终极核武器：用 GitHub API 提交，100% 显示你想要的消息
+      - name: 通过 GitHub API 提交（永不显示 workflow 路径）
         if: steps.convert.outputs.converted == 'true'
-        env:
-          MRS_FILE: ${{ matrix.mrs }}
-          COMMIT_MSG: chore: update ${{ matrix.mrs }} $(date -u '+%Y-%m-%d %H:%M')
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          git add -f "$MRS_FILE"
-          
-          # 这三行是核武器，彻底解决名字不显示
-          export GIT_COMMITTER_NAME="github-actions[bot]"
-          export GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
-          git -c core.hooksPath=/dev/null commit -m "$COMMIT_MSG"
-          
-          git push origin main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '${{ steps.convert.outputs.file }}';
+            const content = fs.readFileSync(path, 'base64');
+            const msg = `chore: update ${{ steps.convert.outputs.file }} ${{ new Date().toISOString().slice(0,16).replace('T',' ') }}`;
+            
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: path,
+              message: msg,
+              content: content,
+              branch: 'main',
+              sha: (await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: path,
+                ref: 'main'
+              })).data.sha
+            }).catch(err => {
+              if (err.message.includes('sha')) {
+                // 文件是新增的，没有 sha
+                return github.rest.repos.createOrUpdateFileContents({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  path: path,
+                  message: msg,
+                  content: content,
+                  branch: 'main'
+                });
+              }
+              throw err;
+            });
+            console.log(`成功提交：${msg}`);
 
   nothing-to-do:
     needs: [download-kernel, convert-and-push]
