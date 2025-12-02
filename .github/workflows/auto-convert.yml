@@ -1,4 +1,4 @@
-name: 更新 mrs（容错版）
+name: 更新 mrs（永不翻车核弹版）
 
 on:
   workflow_dispatch:
