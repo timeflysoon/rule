@@ -1,43 +1,19 @@
-name: Cleanup workflow runs (Manual)
-on: workflow_dispatch
+name: Cleanup Workflow Runs
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup all workflow runs
+      - name: Delete old runs
         run: |
-          echo "正在清理工作流运行记录..."
-          
-          # 安装 GitHub CLI
-          type -p gh >/dev/null || curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-          sudo apt update && sudo apt install gh -y
-          
-          # 设置认证
-          echo "${{ secrets.AUTH_PAT }}" | gh auth login --with-token
-          
-          # 获取所有工作流
-          workflows=$(gh api repos/${{ github.repository }}/actions/workflows --paginate | jq -r '.workflows[].id')
-          
-          for workflow_id in $workflows; do
-            echo "处理工作流 ID: $workflow_id"
-            
-            # 获取该工作流的所有运行（按时间倒序）
-            runs=$(gh api repos/${{ github.repository }}/actions/workflows/$workflow_id/runs --paginate \
-              --jq '.workflow_runs | sort_by(.created_at) | reverse | .[].id')
-            
-            # 计数器
-            count=0
-            
-            for run_id in $runs; do
-              ((count++))
-              if [ $count -gt 3 ]; then
-                echo "删除运行: $run_id (超出保留数量)"
-                gh api -X DELETE repos/${{ github.repository }}/actions/runs/$run_id
-                sleep 0.5  # 避免速率限制
-              else
-                echo "保留运行: $run_id (第 $count 个)"
-              fi
-            done
-          done
+          # 获取并删除所有超过3个的运行
+          curl -s -H "Authorization: token ${{ secrets.AUTH_PAT }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" \
+            | jq -r '.workflow_runs | group_by(.workflow_id) | .[] | .[3:] | .[].id' \
+            | xargs -I {} curl -X DELETE \
+                -H "Authorization: token ${{ secrets.AUTH_PAT }}" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/runs/{}"
