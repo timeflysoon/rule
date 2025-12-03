@@ -13,4 +13,4 @@ jobs:
         with:
           token: ${{ secrets.AUTH_PAT }}
           repository: ${{ github.repository }}
-          retain_days: 7
+          retain_days: 0
