@@ -1,85 +1,20 @@
 name: Cleanup All Workflow Runs
 on:
   schedule:
-    - cron: '0 0 * * 0'  # 每周日凌晨自动运行
-  workflow_dispatch:      # 可手动触发
+    - cron: '0 0 * * 0'
+      timezone: 'Asia/Shanghai'  # 使用北京时间，每周日0点
+  workflow_dispatch:              # 允许手动触发
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete ALL workflow runs (keep current only)
+      - name: Delete all workflow runs
         run: |
-          echo "🚀 开始清空所有工作流运行记录..."
-          echo "当前运行ID: ${{ github.run_id }}"
-          echo "========================================"
-          
-          # 设置变量
-          OWNER_REPO="${{ github.repository }}"
-          TOKEN="${{ secrets.AUTH_PAT }}"
-          CURRENT_RUN_ID="${{ github.run_id }}"
-          
-          # 统计信息
-          TOTAL_COUNT=0
-          DELETED_COUNT=0
-          KEPT_COUNT=0
-          
-          echo "获取所有工作流运行记录..."
-          
-          # 使用循环处理分页，确保获取所有记录
-          PAGE=1
-          while true; do
-            echo "获取第 $PAGE 页..."
-            
-            # 获取当前页的运行记录
-            RESPONSE=$(curl -s -H "Authorization: token $TOKEN" \
-              "https://api.github.com/repos/$OWNER_REPO/actions/runs?page=$PAGE&per_page=100")
-            
-            # 提取运行ID列表
-            RUN_IDS=$(echo "$RESPONSE" | jq -r '.workflow_runs[].id' 2>/dev/null)
-            
-            # 如果没有更多数据，退出循环
-            if [ -z "$RUN_IDS" ] || [ "$RUN_IDS" = "" ]; then
-              echo "没有更多数据，共获取 $TOTAL_COUNT 条记录"
-              break
-            fi
-            
-            # 处理当前页的每个运行
-            while IFS= read -r RUN_ID; do
-              TOTAL_COUNT=$((TOTAL_COUNT + 1))
-              
-              # 跳过当前运行
-              if [ "$RUN_ID" = "$CURRENT_RUN_ID" ]; then
-                echo "✅ 保留当前运行: $RUN_ID"
-                KEPT_COUNT=$((KEPT_COUNT + 1))
-                continue
-              fi
-              
-              # 删除其他所有运行
-              echo "🗑️  删除运行: $RUN_ID"
-              DELETE_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                -H "Authorization: token $TOKEN" \
-                "https://api.github.com/repos/$OWNER_REPO/actions/runs/$RUN_ID")
-              
-              if [ "$DELETE_RESPONSE" = "204" ]; then
-                DELETED_COUNT=$((DELETED_COUNT + 1))
-                echo "  删除成功 (HTTP $DELETE_RESPONSE)"
-              else
-                echo "  删除失败 (HTTP $DELETE_RESPONSE)"
-              fi
-              
-              # 避免速率限制
-              sleep 0.3
-              
-            done <<< "$RUN_IDS"
-            
-            PAGE=$((PAGE + 1))
-          done
-          
-          echo "========================================"
-          echo "🎉 清理完成！"
-          echo "📊 统计信息:"
-          echo "   总共找到: $TOTAL_COUNT 条记录"
-          echo "   成功删除: $DELETED_COUNT 条记录"
-          echo "   保留当前: $KEPT_COUNT 条记录"
-          echo "========================================"
+          # 删除所有可以删除的记录
+          curl -s -H "Authorization: token ${{ secrets.AUTH_PAT }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=100" \
+            | jq -r '.workflow_runs | map(select(.status != "in_progress")) | .[].id' \
+            | xargs -I {} curl -X DELETE \
+                -H "Authorization: token ${{ secrets.AUTH_PAT }}" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/runs/{}"
