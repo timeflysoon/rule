@@ -1,0 +1,2569 @@
+<html lang="zh-CN"><head>
+    <meta charset="UTF-8">
+    <title>我的收藏夹</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0; padding: 20px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh; color: #333;
+        }
+        .container {
+            max-width: 1000px; margin: 0 auto; background: #fff;
+            border-radius: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.12);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff; padding: 35px; text-align: center;
+        }
+        .header h1 { 
+            margin: 0; 
+            font-size: 2.3em; 
+            font-weight: 900;  /* 改为更粗的字体权重 */
+            font-family: "黑体", "Microsoft JhengHei", "Microsoft YaHei", sans-serif; /* 添加黑体 */
+            -webkit-font-smoothing: antialiased; /* 改善字体渲染 */
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); /* 添加轻微阴影增强立体感 */
+            letter-spacing: 2px; /* 略微增加字间距 */
+        }
+        .content { padding: 30px; }
+        .section {
+            margin-bottom: 28px; padding: 22px;
+            border: 1px solid #e0e0e0; border-radius: 12px;
+            background: #fafafa;
+        }
+        h3 { margin: 0 0 16px; color: #555; font-weight: 500; }
+        input, textarea {
+            width: 100%; padding: 11px 14px; margin: 8px 0;
+            border: 1px solid #ddd; border-radius: 8px;
+            font-size: 14px;
+        }
+        input:focus, textarea:focus {
+            outline: none; border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,.2);
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff; border: none; padding: 10px 18px;
+            border-radius: 8px; cursor: pointer; font-size: 14px;
+            margin: 5px; transition: .2s;
+        }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(102,126,234,.3); }
+        
+        /* 方案二：半透明质感 - 编辑和删除按钮 */
+        button.small-btn { 
+            padding: 6px 12px !important; 
+            font-size: 13px !important; 
+            font-weight: 500;
+            border: none !important;
+            transition: all 0.2s ease !important;
+            border-radius: 6px !important;
+        }
+
+        /* 编辑按钮 - 半透明白色 */
+        button.small-btn:nth-child(1) { 
+            background: rgba(102, 126, 234, 0.1) !important;
+            border: 1px solid rgba(102, 126, 234, 0.3) !important;
+            color: #667eea !important;
+        }
+        button.small-btn:nth-child(1):hover {
+            background: rgba(102, 126, 234, 0.2) !important;
+            border: 1px solid rgba(102, 126, 234, 0.5) !important;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2) !important;
+        }
+
+        /* 删除按钮 - 半透明红色 */
+        button.small-btn:nth-child(2) { 
+            background: rgba(245, 101, 101, 0.1) !important;
+            border: 1px solid rgba(245, 101, 101, 0.3) !important;
+            color: #f56565 !important;
+        }
+        button.small-btn:nth-child(2):hover {
+            background: rgba(245, 101, 101, 0.2) !important;
+            border: 1px solid rgba(245, 101, 101, 0.5) !important;
+            box-shadow: 0 2px 8px rgba(245, 101, 101, 0.2) !important;
+        }
+
+        .actions {
+            display: flex;
+            flex-shrink: 0;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .bookmark-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background .2s;
+            gap: 15px;
+        }
+        .bookmark-item:hover { background: #f8f9ff; }
+        .item-main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            min-width: 0;
+        }
+        .item-title {
+            font-weight: 500; color: #667eea;
+            text-decoration: none; font-size: 15px;
+            min-width: 150px; flex-shrink: 0;
+        }
+        .item-title:hover { text-decoration: underline; }
+        .item-url {
+            font-size: 13px; color: #666;
+            flex: 1;
+            word-break: break-all;
+            overflow-wrap: break-word;
+            white-space: normal;
+        }
+
+        .status {
+            padding: 12px; border-radius: 8px;
+            margin: 12px 0; text-align: center;
+            font-weight: 500;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .info { background: #d1ecf1; color: #0c5460; }
+        .hidden { display: none !important; }
+
+        .modal {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,.5); z-index: 999;
+        }
+        .modal-content {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff; width: 90%; max-width: 500px;
+            border-radius: 16px; padding: 28px;
+            box-shadow: 0 20px 60px rgba(0,0,0,.3);
+        }
+        .modal-header {
+            font-size: 1.4em; margin-bottom: 20px;
+            text-align: center; color: #444;
+        }
+        .modal-footer { margin-top: 24px; text-align: right; }
+        .btn-close {
+            position: absolute; top: 12px; right: 16px;
+            font-size: 24px; cursor: pointer; color: #aaa;
+        }
+        .btn-close:hover { color: #333; }
+        
+        /* 隐藏的文件输入框 */
+        .file-input { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>我的收藏夹</h1>
+            <p>单文件 · 数据内嵌 · 手动保存</p>
+        </div>
+
+        <div class="content">
+            <!-- 导入区域 - 简化版 -->
+            <div class="section">
+                <h3>导入书签</h3>
+                <div style="margin-bottom: 12px;">
+                    <button id="importBtn" onclick="importHtmlFile()">导入书签 HTML 文件</button>
+                    <!-- 隐藏的文件输入框 -->
+                    <input type="file" id="htmlFile" class="file-input" accept=".html,.htm">
+                </div>
+                <div id="importStatus" class="status success hidden">书签导入完成：新增 126 条，更新 5 条</div>
+            </div>
+
+            <!-- 列表区域 -->
+            <div class="section" id="listSection" style="display: block;">
+                <h3>我的收藏夹 <span id="itemCount" style="color:#667eea">(126 条)</span></h3>
+                <input type="text" id="searchInput" placeholder="搜索标题或网址..." oninput="filterItems()">
+                
+                <div style="border: 1px solid #eee; border-radius: 10px; margin-top: 15px; background: #fff;">
+                    <ul id="bookmarkList" style="margin:0; padding:0; list-style:none;">
+        <li class="bookmark-item" data-index="0">
+            <div class="item-main">
+                <a href="http://zx.500.com/jczq/worth/" target="_blank" class="item-title">竞彩对阵球队身价-500彩票网</a>
+                <span class="item-url">http://zx.500.com/jczq/worth/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(0)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(0)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="1">
+            <div class="item-main">
+                <a href="https://www.okooo.com/livecenter/" target="_blank" class="item-title">澳客网</a>
+                <span class="item-url">https://www.okooo.com/livecenter/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(1)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(1)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="2">
+            <div class="item-main">
+                <a href="https://live.nowscore.com/" target="_blank" class="item-title">捷报比分网</a>
+                <span class="item-url">https://live.nowscore.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(2)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(2)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="3">
+            <div class="item-main">
+                <a href="https://live.titan007.com/" target="_blank" class="item-title">新球比分网</a>
+                <span class="item-url">https://live.titan007.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(3)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(3)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="4">
+            <div class="item-main">
+                <a href="https://live.leisu.com/" target="_blank" class="item-title">雷速足球比分</a>
+                <span class="item-url">https://live.leisu.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(4)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(4)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="5">
+            <div class="item-main">
+                <a href="https://live.dszuqiu.com/" target="_blank" class="item-title">DS足球</a>
+                <span class="item-url">https://live.dszuqiu.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(5)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(5)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="6">
+            <div class="item-main">
+                <a href="https://www.dszuqiu.com/data" target="_blank" class="item-title">国际足球联赛资料库 - DS足球</a>
+                <span class="item-url">https://www.dszuqiu.com/data</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(6)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(6)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="7">
+            <div class="item-main">
+                <a href="https://outlook.live.com/mail/0/" target="_blank" class="item-title">邮件-timeflysoon@outlook.com-Outlook</a>
+                <span class="item-url">https://outlook.live.com/mail/0/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(7)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(7)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="8">
+            <div class="item-main">
+                <a href="https://mail.google.com/mail/u/0/#inbox" target="_blank" class="item-title">收件箱-timeflysoon8@gmail.com-Gmail</a>
+                <span class="item-url">https://mail.google.com/mail/u/0/#inbox</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(8)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(8)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="9">
+            <div class="item-main">
+                <a href="https://www.sofascore.com/zh/" target="_blank" class="item-title">SofaScore: 足球比分 2021</a>
+                <span class="item-url">https://www.sofascore.com/zh/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(9)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(9)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="10">
+            <div class="item-main">
+                <a href="https://www.liaku.com/#/home" target="_blank" class="item-title">俩酷兑换-专业快捷兑换</a>
+                <span class="item-url">https://www.liaku.com/#/home</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(10)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(10)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="11">
+            <div class="item-main">
+                <a href="https://www.booking.com/" target="_blank" class="item-title">Booking.com酒店，机票，租车和住宿</a>
+                <span class="item-url">https://www.booking.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(11)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(11)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="12">
+            <div class="item-main">
+                <a href="https://www.365sport365.com/#/HO" target="_blank" class="item-title">bet365体育1</a>
+                <span class="item-url">https://www.365sport365.com/#/HO</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(12)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(12)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="13">
+            <div class="item-main">
+                <a href="https://www.allsport365.com/#/HO" target="_blank" class="item-title">bet365体育2</a>
+                <span class="item-url">https://www.allsport365.com/#/HO</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(13)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(13)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="14">
+            <div class="item-main">
+                <a href="https://www.365sb.com/#/HO/" target="_blank" class="item-title">bet365体育3</a>
+                <span class="item-url">https://www.365sb.com/#/HO/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(14)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(14)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="15">
+            <div class="item-main">
+                <a href="https://www.bet-mart.com/#/HO/" target="_blank" class="item-title">bet365体育4</a>
+                <span class="item-url">https://www.bet-mart.com/#/HO/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(15)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(15)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="16">
+            <div class="item-main">
+                <a href="https://www.fun130.com/" target="_blank" class="item-title">乐天堂官网</a>
+                <span class="item-url">https://www.fun130.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(16)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(16)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="17">
+            <div class="item-main">
+                <a href="https://www.funhelp88.com/" target="_blank" class="item-title">乐天堂 - 备份网址</a>
+                <span class="item-url">https://www.funhelp88.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(17)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(17)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="18">
+            <div class="item-main">
+                <a href="https://1xbet3288.com/" target="_blank" class="item-title">1XBET.COM-1</a>
+                <span class="item-url">https://1xbet3288.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(18)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(18)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="19">
+            <div class="item-main">
+                <a href="https://1xbet8887.com/" target="_blank" class="item-title">1XBET.COM-2</a>
+                <span class="item-url">https://1xbet8887.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(19)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(19)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="20">
+            <div class="item-main">
+                <a href="https://www.biwei20.com/cn/" target="_blank" class="item-title">Betway必威官网-1</a>
+                <span class="item-url">https://www.biwei20.com/cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(20)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(20)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="21">
+            <div class="item-main">
+                <a href="https://www.bway95.com/cn/" target="_blank" class="item-title">Betway必威官网-2</a>
+                <span class="item-url">https://www.bway95.com/cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(21)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(21)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="22">
+            <div class="item-main">
+                <a href="https://www.bw88help.com/" target="_blank" class="item-title">Betway必威 - 备用网址</a>
+                <span class="item-url">https://www.bw88help.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(22)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(22)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="23">
+            <div class="item-main">
+                <a href="https://www.ud1q.com/" target="_blank" class="item-title">优德W88</a>
+                <span class="item-url">https://www.ud1q.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(23)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(23)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="24">
+            <div class="item-main">
+                <a href="http://www.fblife.com/" target="_blank" class="item-title">越野e族</a>
+                <span class="item-url">http://www.fblife.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(24)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(24)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="25">
+            <div class="item-main">
+                <a href="http://www.autohome.com.cn/" target="_blank" class="item-title">汽车之家</a>
+                <span class="item-url">http://www.autohome.com.cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(25)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(25)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="26">
+            <div class="item-main">
+                <a href="http://www.mexmass.com/" target="_blank" class="item-title">MAYA</a>
+                <span class="item-url">http://www.mexmass.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(26)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(26)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="27">
+            <div class="item-main">
+                <a href="http://www.bcv888.com/bet365/" target="_blank" class="item-title">博彩VIP</a>
+                <span class="item-url">http://www.bcv888.com/bet365/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(27)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(27)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="28">
+            <div class="item-main">
+                <a href="http://www.taobao.com/" target="_blank" class="item-title">淘宝网</a>
+                <span class="item-url">http://www.taobao.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(28)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(28)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="29">
+            <div class="item-main">
+                <a href="https://www.jd.com/" target="_blank" class="item-title">京东</a>
+                <span class="item-url">https://www.jd.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(29)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(29)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="30">
+            <div class="item-main">
+                <a href="https://www.google.com/ncr" target="_blank" class="item-title">Google</a>
+                <span class="item-url">https://www.google.com/ncr</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(30)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(30)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="31">
+            <div class="item-main">
+                <a href="https://www.youtube.com/" target="_blank" class="item-title">YouTube</a>
+                <span class="item-url">https://www.youtube.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(31)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(31)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="32">
+            <div class="item-main">
+                <a href="https://www.tiktok.com/" target="_blank" class="item-title">TikTok</a>
+                <span class="item-url">https://www.tiktok.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(32)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(32)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="33">
+            <div class="item-main">
+                <a href="https://www.baidu.com/" target="_blank" class="item-title">百度</a>
+                <span class="item-url">https://www.baidu.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(33)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(33)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="34">
+            <div class="item-main">
+                <a href="http://live.qq.com/directory/game/Football" target="_blank" class="item-title">企鹅直播</a>
+                <span class="item-url">http://live.qq.com/directory/game/Football</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(34)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(34)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="35">
+            <div class="item-main">
+                <a href="http://sports.qq.com/kbsweb/" target="_blank" class="item-title">腾讯体育直播</a>
+                <span class="item-url">http://sports.qq.com/kbsweb/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(35)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(35)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="36">
+            <div class="item-main">
+                <a href="https://mobile.pinduoduo.com/" target="_blank" class="item-title">拼多多</a>
+                <span class="item-url">https://mobile.pinduoduo.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(36)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(36)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="37">
+            <div class="item-main">
+                <a href="https://www.weather.com.cn/weather40d/101210606.shtml" target="_blank" class="item-title">仙居天气预报</a>
+                <span class="item-url">https://www.weather.com.cn/weather40d/101210606.shtml</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(37)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(37)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="38">
+            <div class="item-main">
+                <a href="https://ipleak.net/" target="_blank" class="item-title">IP/DNS Detect</a>
+                <span class="item-url">https://ipleak.net/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(38)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(38)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="39">
+            <div class="item-main">
+                <a href="https://browserleaks.com/dns" target="_blank" class="item-title">DNS Leak Test - BrowserLeaks</a>
+                <span class="item-url">https://browserleaks.com/dns</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(39)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(39)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="40">
+            <div class="item-main">
+                <a href="https://ipcheck.aibici.org/#/pingtest" target="_blank" class="item-title">IPCheck - WebRTC 测试</a>
+                <span class="item-url">https://ipcheck.aibici.org/#/pingtest</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(40)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(40)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="41">
+            <div class="item-main">
+                <a href="https://www.yalala.com/" target="_blank" class="item-title">浏览器指纹在线检测网站</a>
+                <span class="item-url">https://www.yalala.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(41)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(41)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="42">
+            <div class="item-main">
+                <a href="https://ip.sb/" target="_blank" class="item-title">IP Address Lookup / IPv4 / IPv6 - IP.SB</a>
+                <span class="item-url">https://ip.sb/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(42)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(42)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="43">
+            <div class="item-main">
+                <a href="https://ip-api.com/" target="_blank" class="item-title">IP-API.com - Geolocation API</a>
+                <span class="item-url">https://ip-api.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(43)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(43)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="44">
+            <div class="item-main">
+                <a href="https://test-ipv6.com/" target="_blank" class="item-title">IPv6 连接测试</a>
+                <span class="item-url">https://test-ipv6.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(44)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(44)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="45">
+            <div class="item-main">
+                <a href="https://testipv6.com/" target="_blank" class="item-title">IPv6 测试</a>
+                <span class="item-url">https://testipv6.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(45)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(45)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="46">
+            <div class="item-main">
+                <a href="https://www.itdog.cn/ping/" target="_blank" class="item-title">在线ping__服务器延迟测试</a>
+                <span class="item-url">https://www.itdog.cn/ping/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(46)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(46)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="47">
+            <div class="item-main">
+                <a href="https://www.youtube.com/watch?v=KLuTLF3x9sA" target="_blank" class="item-title">Norway 4K • 测速</a>
+                <span class="item-url">https://www.youtube.com/watch?v=KLuTLF3x9sA</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(47)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(47)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="48">
+            <div class="item-main">
+                <a href="https://www.spaceship.com/zh/" target="_blank" class="item-title">Spaceship - 域名注册</a>
+                <span class="item-url">https://www.spaceship.com/zh/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(48)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(48)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="49">
+            <div class="item-main">
+                <a href="https://www.oo-software.com/en/shutup10" target="_blank" class="item-title">ShutUp10++关闭Windows隐私收集工具</a>
+                <span class="item-url">https://www.oo-software.com/en/shutup10</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(49)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(49)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="50">
+            <div class="item-main">
+                <a href="https://openwrt.ai/" target="_blank" class="item-title">Kwrt(OpenWrt)软路由固件下载与在线定制编译</a>
+                <span class="item-url">https://openwrt.ai/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(50)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(50)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="51">
+            <div class="item-main">
+                <a href="https://doc.linkease.com/zh/guide/istoreos/" target="_blank" class="item-title">iStoreOS 固件</a>
+                <span class="item-url">https://doc.linkease.com/zh/guide/istoreos/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(51)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(51)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="52">
+            <div class="item-main">
+                <a href="https://fw.koolcenter.com/" target="_blank" class="item-title">KoolCenter 固件下载服务器</a>
+                <span class="item-url">https://fw.koolcenter.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(52)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(52)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="53">
+            <div class="item-main">
+                <a href="http://192.168.2.2:9090/ui/zashboard/#/proxies" target="_blank" class="item-title">OpenClash - zashboard | 代理</a>
+                <span class="item-url">http://192.168.2.2:9090/ui/zashboard/#/proxies</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(53)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(53)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="54">
+            <div class="item-main">
+                <a href="https://192.168.2.5/ui/#/login" target="_blank" class="item-title">登录 - VMware ESXi</a>
+                <span class="item-url">https://192.168.2.5/ui/#/login</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(54)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(54)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="55">
+            <div class="item-main">
+                <a href="http://192.168.2.1/cgi-bin/luci/" target="_blank" class="item-title">Kwrt-PR</a>
+                <span class="item-url">http://192.168.2.1/cgi-bin/luci/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(55)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(55)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="56">
+            <div class="item-main">
+                <a href="http://192.168.2.2/cgi-bin/luci/" target="_blank" class="item-title">Kwrt-SR</a>
+                <span class="item-url">http://192.168.2.2/cgi-bin/luci/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(56)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(56)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="57">
+            <div class="item-main">
+                <a href="http://192.168.2.3/ui/sessions/signin" target="_blank" class="item-title">TrueNAS-192.168.2.3</a>
+                <span class="item-url">http://192.168.2.3/ui/sessions/signin</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(57)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(57)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="58">
+            <div class="item-main">
+                <a href="https://x.k222.netlib.re:2053/A2GJF/" target="_blank" class="item-title">3x-ui登录RackNerd2</a>
+                <span class="item-url">https://x.k222.netlib.re:2053/A2GJF/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(58)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(58)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="59">
+            <div class="item-main">
+                <a href="https://x.t333.netlib.re:2053/XM9zKbh/" target="_blank" class="item-title">3x-ui登录RackNerd3</a>
+                <span class="item-url">https://x.t333.netlib.re:2053/XM9zKbh/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(59)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(59)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="60">
+            <div class="item-main">
+                <a href="https://x.z111.netlib.re:2053/E36LXtky/" target="_blank" class="item-title">3x-ui登录uqidc</a>
+                <span class="item-url">https://x.z111.netlib.re:2053/E36LXtky/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(60)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(60)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="61">
+            <div class="item-main">
+                <a href="https://x188.netlib.re/" target="_blank" class="item-title">Sublink Worker 订阅转换</a>
+                <span class="item-url">https://x188.netlib.re/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(61)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(61)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="62">
+            <div class="item-main">
+                <a href="https://scamalytics.com/" target="_blank" class="item-title">Scamalytics – IP 风险评分</a>
+                <span class="item-url">https://scamalytics.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(62)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(62)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="63">
+            <div class="item-main">
+                <a href="https://www.gwvpsceping.com/" target="_blank" class="item-title">国外VPS测评</a>
+                <span class="item-url">https://www.gwvpsceping.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(63)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(63)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="64">
+            <div class="item-main">
+                <a href="https://huggingface.co/" target="_blank" class="item-title">Hugging Face</a>
+                <span class="item-url">https://huggingface.co/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(64)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(64)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="65">
+            <div class="item-main">
+                <a href="https://app.vmiss.com/store/us-los-angeles-cmin2" target="_blank" class="item-title">Shopping Cart - VMISS</a>
+                <span class="item-url">https://app.vmiss.com/store/us-los-angeles-cmin2</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(65)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(65)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="66">
+            <div class="item-main">
+                <a href="https://bytevirt.com/store/vps-tw-kvm-lite" target="_blank" class="item-title">VPS.TW.KVM.Lite - ByteVirt LLC</a>
+                <span class="item-url">https://bytevirt.com/store/vps-tw-kvm-lite</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(66)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(66)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="67">
+            <div class="item-main">
+                <a href="https://my.racknerd.com/clientarea.php?action=productdetails&amp;id=384233" target="_blank" class="item-title">Client Area - RackNerd LLC</a>
+                <span class="item-url">https://my.racknerd.com/clientarea.php?action=productdetails&amp;id=384233</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(67)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(67)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="68">
+            <div class="item-main">
+                <a href="https://nerdvm.racknerd.com/login.php" target="_blank" class="item-title">Control Panel- RackNerd LLC</a>
+                <span class="item-url">https://nerdvm.racknerd.com/login.php</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(68)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(68)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="69">
+            <div class="item-main">
+                <a href="https://www.uqidc.com/login" target="_blank" class="item-title">登录 | UQIDC</a>
+                <span class="item-url">https://www.uqidc.com/login</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(69)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(69)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="70">
+            <div class="item-main">
+                <a href="https://dash.domain.digitalplat.org/" target="_blank" class="item-title">US.KG Domain Panel</a>
+                <span class="item-url">https://dash.domain.digitalplat.org/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(70)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(70)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="71">
+            <div class="item-main">
+                <a href="https://www.netlib.re/" target="_blank" class="item-title">netlib.re 免费域名</a>
+                <span class="item-url">https://www.netlib.re/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(71)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(71)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="72">
+            <div class="item-main">
+                <a href="https://my.dnshe.com/clientarea.php" target="_blank" class="item-title">DNSHE 免费域名</a>
+                <span class="item-url">https://my.dnshe.com/clientarea.php</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(72)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(72)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="73">
+            <div class="item-main">
+                <a href="https://www.cloudflare-cn.com/" target="_blank" class="item-title">科赋锐信息科技Cloudflare | Cloudflare</a>
+                <span class="item-url">https://www.cloudflare-cn.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(73)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(73)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="74">
+            <div class="item-main">
+                <a href="https://bulianglin.com/archives/cdn.html" target="_blank" class="item-title">最佳的CDN节点优选IP工具</a>
+                <span class="item-url">https://bulianglin.com/archives/cdn.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(74)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(74)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="75">
+            <div class="item-main">
+                <a href="https://sms-activate.io/cn" target="_blank" class="item-title">SMS-Activate虚拟短信接收服务</a>
+                <span class="item-url">https://sms-activate.io/cn</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(75)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(75)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="76">
+            <div class="item-main">
+                <a href="https://www.speedtest.net/" target="_blank" class="item-title">Speedtest by Ookla</a>
+                <span class="item-url">https://www.speedtest.net/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(76)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(76)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="77">
+            <div class="item-main">
+                <a href="https://librespeed.org/" target="_blank" class="item-title">LibreSpeed - Speed Test</a>
+                <span class="item-url">https://librespeed.org/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(77)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(77)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="78">
+            <div class="item-main">
+                <a href="https://dengta.cfd/" target="_blank" class="item-title">灯塔</a>
+                <span class="item-url">https://dengta.cfd/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(78)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(78)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="79">
+            <div class="item-main">
+                <a href="https://neverinstall.com/" target="_blank" class="item-title">Neverinstall</a>
+                <span class="item-url">https://neverinstall.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(79)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(79)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="80">
+            <div class="item-main">
+                <a href="https://chat.deepseek.com/" target="_blank" class="item-title">DeepSeek</a>
+                <span class="item-url">https://chat.deepseek.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(80)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(80)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="81">
+            <div class="item-main">
+                <a href="https://aistudio.google.com/prompts/new_chat" target="_blank" class="item-title">Google AI Studio</a>
+                <span class="item-url">https://aistudio.google.com/prompts/new_chat</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(81)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(81)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="82">
+            <div class="item-main">
+                <a href="https://grok.com/" target="_blank" class="item-title">Grok</a>
+                <span class="item-url">https://grok.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(82)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(82)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="83">
+            <div class="item-main">
+                <a href="https://chatgpt.com/" target="_blank" class="item-title">ChatGPT</a>
+                <span class="item-url">https://chatgpt.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(83)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(83)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="84">
+            <div class="item-main">
+                <a href="https://www.twitch.tv/" target="_blank" class="item-title">Twitch</a>
+                <span class="item-url">https://www.twitch.tv/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(84)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(84)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="85">
+            <div class="item-main">
+                <a href="https://tv.garden/" target="_blank" class="item-title">Watch Global &amp; tv.garden</a>
+                <span class="item-url">https://tv.garden/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(85)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(85)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="86">
+            <div class="item-main">
+                <a href="https://cn.pornhub.com/" target="_blank" class="item-title">Pornhub</a>
+                <span class="item-url">https://cn.pornhub.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(86)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(86)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="87">
+            <div class="item-main">
+                <a href="https://www.xvideos.com/" target="_blank" class="item-title">XVIDEOS.COM</a>
+                <span class="item-url">https://www.xvideos.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(87)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(87)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="88">
+            <div class="item-main">
+                <a href="https://github.com/timeflysoon/img-installer" target="_blank" class="item-title">GitHub</a>
+                <span class="item-url">https://github.com/timeflysoon/img-installer</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(88)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(88)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="89">
+            <div class="item-main">
+                <a href="https://github.com/search?q=v2ray+%E8%8A%82%E7%82%B9&amp;type=repositories&amp;s=updated&amp;o=desc" target="_blank" class="item-title">GitHub搜索“v2ray 节点”</a>
+                <span class="item-url">https://github.com/search?q=v2ray+%E8%8A%82%E7%82%B9&amp;type=repositories&amp;s=updated&amp;o=desc</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(89)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(89)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="90">
+            <div class="item-main">
+                <a href="https://github.com/search?q=free+v2ray&amp;type=repositories&amp;s=updated&amp;o=desc" target="_blank" class="item-title">GitHub搜索“free v2ray”</a>
+                <span class="item-url">https://github.com/search?q=free+v2ray&amp;type=repositories&amp;s=updated&amp;o=desc</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(90)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(90)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="91">
+            <div class="item-main">
+                <a href="https://fofa.info/result?qbase64=Ym9keT0i6Ieq5Yqo5oqT5Y%20WdGfpopHpgZPjgIHorqLpmIXlnLDlnYDjgIHlhazlvIDkupLogZTnvZHkuIrnmoRzc%20OAgXNzcuOAgXZtZXNz44CBdHJvamFu6IqC54K55L%20h5oGvIg%3D%3D" target="_blank" class="item-title">FOFA 公益节点池</a>
+                <span class="item-url">https://fofa.info/result?qbase64=Ym9keT0i6Ieq5Yqo5oqT5Y%20WdGfpopHpgZPjgIHorqLpmIXlnLDlnYDjgIHlhazlvIDkupLogZTnvZHkuIrnmoRzc%20OAgXNzcuOAgXZtZXNz44CBdHJvamFu6IqC54K55L%20h5oGvIg%3D%3D</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(91)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(91)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="92">
+            <div class="item-main">
+                <a href="https://t.me/setlanguage/classic-zh" target="_blank" class="item-title">Telegram: Set Language“大陆简中”</a>
+                <span class="item-url">https://t.me/setlanguage/classic-zh</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(92)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(92)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="93">
+            <div class="item-main">
+                <a href="https://web.baimiaoapp.com/image-to-excel" target="_blank" class="item-title">图片转Excel表格在线</a>
+                <span class="item-url">https://web.baimiaoapp.com/image-to-excel</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(93)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(93)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="94">
+            <div class="item-main">
+                <a href="https://www.clipto.com/media-downloader/youtube-downloader" target="_blank" class="item-title">Youtube 视频在线下载</a>
+                <span class="item-url">https://www.clipto.com/media-downloader/youtube-downloader</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(94)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(94)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="95">
+            <div class="item-main">
+                <a href="https://y2down.cc/" target="_blank" class="item-title">网页视频下载器-y2down.cc</a>
+                <span class="item-url">https://y2down.cc/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(95)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(95)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="96">
+            <div class="item-main">
+                <a href="http://www.ludashi.com/rank/cpuRanking.html" target="_blank" class="item-title">鲁大师天梯榜</a>
+                <span class="item-url">http://www.ludashi.com/rank/cpuRanking.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(96)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(96)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="97">
+            <div class="item-main">
+                <a href="https://cpu.bmcx.com/" target="_blank" class="item-title">CPU性能排行榜-CPU天梯图</a>
+                <span class="item-url">https://cpu.bmcx.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(97)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(97)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="98">
+            <div class="item-main">
+                <a href="https://earth.google.com/web" target="_blank" class="item-title">Google 地球</a>
+                <span class="item-url">https://earth.google.com/web</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(98)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(98)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="99">
+            <div class="item-main">
+                <a href="https://maps.google.com/" target="_blank" class="item-title">Google 地图</a>
+                <span class="item-url">https://maps.google.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(99)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(99)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="100">
+            <div class="item-main">
+                <a href="http://12321.cn/" target="_blank" class="item-title">12321网络不良与垃圾信息举报受理中心</a>
+                <span class="item-url">http://12321.cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(100)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(100)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="101">
+            <div class="item-main">
+                <a href="http://www.qq.com/" target="_blank" class="item-title">腾讯首页</a>
+                <span class="item-url">http://www.qq.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(101)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(101)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="102">
+            <div class="item-main">
+                <a href="https://weibo.com/u/5288760004/home?wvr=5" target="_blank" class="item-title">微博-随时随地发现新鲜事</a>
+                <span class="item-url">https://weibo.com/u/5288760004/home?wvr=5</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(102)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(102)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="103">
+            <div class="item-main">
+                <a href="https://shop598787767.taobao.com/" target="_blank" class="item-title">首页-蓝乔-淘宝网</a>
+                <span class="item-url">https://shop598787767.taobao.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(103)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(103)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="104">
+            <div class="item-main">
+                <a href="http://www.icbc.com.cn/icbc/" target="_blank" class="item-title">中国工商银行中国网站</a>
+                <span class="item-url">http://www.icbc.com.cn/icbc/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(104)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(104)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="105">
+            <div class="item-main">
+                <a href="http://www.abchina.com/cn/" target="_blank" class="item-title">中国农业银行</a>
+                <span class="item-url">http://www.abchina.com/cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(105)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(105)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="106">
+            <div class="item-main">
+                <a href="http://www.psbc.com/cn/index.html" target="_blank" class="item-title">中国邮政储蓄银行</a>
+                <span class="item-url">http://www.psbc.com/cn/index.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(106)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(106)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="107">
+            <div class="item-main">
+                <a href="http://tv.cctv.com/live/cctv13/" target="_blank" class="item-title">CCTV-13新闻频道高清直播</a>
+                <span class="item-url">http://tv.cctv.com/live/cctv13/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(107)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(107)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="108">
+            <div class="item-main">
+                <a href="https://haveibeenpwned.com/" target="_blank" class="item-title">Have I Been Pwned：查密码泄露</a>
+                <span class="item-url">https://haveibeenpwned.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(108)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(108)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="109">
+            <div class="item-main">
+                <a href="https://www.jq07.com/live?router=live&amp;type=0&amp;id=0&amp;uid=136" target="_blank" class="item-title">七加直播</a>
+                <span class="item-url">https://www.jq07.com/live?router=live&amp;type=0&amp;id=0&amp;uid=136</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(109)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(109)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="110">
+            <div class="item-main">
+                <a href="https://www.198zb4.com/liveRoomDetails?roomId=100467" target="_blank" class="item-title">198直播</a>
+                <span class="item-url">https://www.198zb4.com/liveRoomDetails?roomId=100467</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(110)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(110)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="111">
+            <div class="item-main">
+                <a href="https://www.tbninduh.com/live/105726" target="_blank" class="item-title">斗球直播</a>
+                <span class="item-url">https://www.tbninduh.com/live/105726</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(111)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(111)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="112">
+            <div class="item-main">
+                <a href="https://www.longzhulive.com/live/259" target="_blank" class="item-title">龙珠直播</a>
+                <span class="item-url">https://www.longzhulive.com/live/259</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(112)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(112)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="113">
+            <div class="item-main">
+                <a href="https://www.miguvideo.com/mgs/website/prd/sportMatchDetail.html" target="_blank" class="item-title">咪咕视频</a>
+                <span class="item-url">https://www.miguvideo.com/mgs/website/prd/sportMatchDetail.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(113)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(113)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="114">
+            <div class="item-main">
+                <a href="https://sports.iqiyi.com/" target="_blank" class="item-title">爱奇艺体育</a>
+                <span class="item-url">https://sports.iqiyi.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(114)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(114)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="115">
+            <div class="item-main">
+                <a href="http://www.ppsport.com/schedules" target="_blank" class="item-title">PP视频</a>
+                <span class="item-url">http://www.ppsport.com/schedules</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(115)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(115)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="116">
+            <div class="item-main">
+                <a href="https://www.bilibili.com/" target="_blank" class="item-title">哔哩哔哩-bilibili</a>
+                <span class="item-url">https://www.bilibili.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(116)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(116)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="117">
+            <div class="item-main">
+                <a href="https://greasyfork.org/zh-CN/scripts" target="_blank" class="item-title">Greasy Fork-用户脚本</a>
+                <span class="item-url">https://greasyfork.org/zh-CN/scripts</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(117)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(117)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="118">
+            <div class="item-main">
+                <a href="http://www.naobiao.com/web_system/naobiao_com_www/api/iframe/baidu/" target="_blank" class="item-title">在线闹钟</a>
+                <span class="item-url">http://www.naobiao.com/web_system/naobiao_com_www/api/iframe/baidu/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(118)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(118)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="119">
+            <div class="item-main">
+                <a href="http://m.yijee.com/" target="_blank" class="item-title">易集</a>
+                <span class="item-url">http://m.yijee.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(119)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(119)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="120">
+            <div class="item-main">
+                <a href="https://www.ri7.com.cn/date-calculator/" target="_blank" class="item-title">日期计算器_时间天数在线查询转换工具</a>
+                <span class="item-url">https://www.ri7.com.cn/date-calculator/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(120)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(120)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="121">
+            <div class="item-main">
+                <a href="http://www.cjzzc.com/http_code.html" target="_blank" class="item-title">网址HTTP状态批量检测</a>
+                <span class="item-url">http://www.cjzzc.com/http_code.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(121)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(121)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="122">
+            <div class="item-main">
+                <a href="https://www.witrn.com/" target="_blank" class="item-title">Witrn维简_U3L(Pro)</a>
+                <span class="item-url">https://www.witrn.com/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(122)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(122)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="123">
+            <div class="item-main">
+                <a href="https://www.alientek.com/Product_Details_12/17.html" target="_blank" class="item-title">正点原子-T80P</a>
+                <span class="item-url">https://www.alientek.com/Product_Details_12/17.html</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(123)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(123)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="124">
+            <div class="item-main">
+                <a href="https://www.fnirsi.cn/" target="_blank" class="item-title">菲尼瑞斯科技_FNIRSI内阻仪</a>
+                <span class="item-url">https://www.fnirsi.cn/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(124)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(124)">删除</button>
+            </div>
+        </li>
+    
+        <li class="bookmark-item" data-index="125">
+            <div class="item-main">
+                <a href="http://www.dayanzai.me/" target="_blank" class="item-title">大眼仔旭</a>
+                <span class="item-url">http://www.dayanzai.me/</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(125)">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(125)">删除</button>
+            </div>
+        </li>
+    </ul>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <button onclick="openAddDialog()">+ 添加新书签</button>
+                    <button onclick="saveToFile()" style="background: #28a745;" id="saveBtn">保存到文件</button>
+                    <button onclick="clearAllData()" style="background: #dc3545;">清空所有数据</button>
+                </div>
+            </div>
+
+            <div id="globalStatus" class="status success hidden">已保存到【我的收藏夹_2025-12-09.html】文件中</div>
+        </div>
+    </div>
+
+    <!-- 添加/编辑对话框 -->
+    <div class="modal" id="editDialog">
+        <div class="modal-content">
+            <div class="btn-close" onclick="closeDialog()">×</div>
+            <div class="modal-header" id="dialogTitle">添加新书签</div>
+            <div>
+                <input type="text" id="inputTitle" placeholder="名称 *" required="">
+                <input type="text" id="inputUrl" placeholder="请输入有效的 URL *" required="">
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeDialog()">取消</button>
+                <button onclick="saveBookmark()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 数据存储区 - 所有数据都存储在这里 -->
+    <div id="bookmarkData" style="display:none">
+{
+  "bookmarks": [
+    {
+      "title": "竞彩对阵球队身价-500彩票网",
+      "url": "http://zx.500.com/jczq/worth/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "澳客网",
+      "url": "https://www.okooo.com/livecenter/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "捷报比分网",
+      "url": "https://live.nowscore.com/",
+      "created": "2025-12-09T11:40:06.668Z",
+      "updated": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "新球比分网",
+      "url": "https://live.titan007.com/",
+      "created": "2025-12-09T11:40:06.668Z",
+      "updated": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "雷速足球比分",
+      "url": "https://live.leisu.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "DS足球",
+      "url": "https://live.dszuqiu.com/",
+      "created": "2025-12-09T11:40:06.668Z",
+      "updated": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "国际足球联赛资料库 - DS足球",
+      "url": "https://www.dszuqiu.com/data",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "邮件-timeflysoon@outlook.com-Outlook",
+      "url": "https://outlook.live.com/mail/0/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "收件箱-timeflysoon8@gmail.com-Gmail",
+      "url": "https://mail.google.com/mail/u/0/#inbox",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "SofaScore: 足球比分 2021",
+      "url": "https://www.sofascore.com/zh/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "俩酷兑换-专业快捷兑换",
+      "url": "https://www.liaku.com/#/home",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Booking.com酒店，机票，租车和住宿",
+      "url": "https://www.booking.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "bet365体育1",
+      "url": "https://www.365sport365.com/#/HO",
+      "created": "2025-12-09T11:40:06.668Z",
+      "updated": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "bet365体育2",
+      "url": "https://www.allsport365.com/#/HO",
+      "created": "2025-12-09T11:40:06.668Z",
+      "updated": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "bet365体育3",
+      "url": "https://www.365sb.com/#/HO/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "bet365体育4",
+      "url": "https://www.bet-mart.com/#/HO/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "乐天堂官网",
+      "url": "https://www.fun130.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "乐天堂 - 备份网址",
+      "url": "https://www.funhelp88.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "1XBET.COM-1",
+      "url": "https://1xbet3288.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "1XBET.COM-2",
+      "url": "https://1xbet8887.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Betway必威官网-1",
+      "url": "https://www.biwei20.com/cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Betway必威官网-2",
+      "url": "https://www.bway95.com/cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Betway必威 - 备用网址",
+      "url": "https://www.bw88help.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "优德W88",
+      "url": "https://www.ud1q.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "越野e族",
+      "url": "http://www.fblife.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "汽车之家",
+      "url": "http://www.autohome.com.cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "MAYA",
+      "url": "http://www.mexmass.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "博彩VIP",
+      "url": "http://www.bcv888.com/bet365/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "淘宝网",
+      "url": "http://www.taobao.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "京东",
+      "url": "https://www.jd.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Google",
+      "url": "https://www.google.com/ncr",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "YouTube",
+      "url": "https://www.youtube.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "TikTok",
+      "url": "https://www.tiktok.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "百度",
+      "url": "https://www.baidu.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "企鹅直播",
+      "url": "http://live.qq.com/directory/game/Football",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "腾讯体育直播",
+      "url": "http://sports.qq.com/kbsweb/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "拼多多",
+      "url": "https://mobile.pinduoduo.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "仙居天气预报",
+      "url": "https://www.weather.com.cn/weather40d/101210606.shtml",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IP/DNS Detect",
+      "url": "https://ipleak.net/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "DNS Leak Test - BrowserLeaks",
+      "url": "https://browserleaks.com/dns",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IPCheck - WebRTC 测试",
+      "url": "https://ipcheck.aibici.org/#/pingtest",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "浏览器指纹在线检测网站",
+      "url": "https://www.yalala.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IP Address Lookup / IPv4 / IPv6 - IP.SB",
+      "url": "https://ip.sb/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IP-API.com - Geolocation API",
+      "url": "https://ip-api.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IPv6 连接测试",
+      "url": "https://test-ipv6.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "IPv6 测试",
+      "url": "https://testipv6.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "在线ping__服务器延迟测试",
+      "url": "https://www.itdog.cn/ping/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Norway 4K • 测速",
+      "url": "https://www.youtube.com/watch?v=KLuTLF3x9sA",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Spaceship - 域名注册",
+      "url": "https://www.spaceship.com/zh/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "ShutUp10++关闭Windows隐私收集工具",
+      "url": "https://www.oo-software.com/en/shutup10",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Kwrt(OpenWrt)软路由固件下载与在线定制编译",
+      "url": "https://openwrt.ai/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "iStoreOS 固件",
+      "url": "https://doc.linkease.com/zh/guide/istoreos/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "KoolCenter 固件下载服务器",
+      "url": "https://fw.koolcenter.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "OpenClash - zashboard | 代理",
+      "url": "http://192.168.2.2:9090/ui/zashboard/#/proxies",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "登录 - VMware ESXi",
+      "url": "https://192.168.2.5/ui/#/login",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Kwrt-PR",
+      "url": "http://192.168.2.1/cgi-bin/luci/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Kwrt-SR",
+      "url": "http://192.168.2.2/cgi-bin/luci/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "TrueNAS-192.168.2.3",
+      "url": "http://192.168.2.3/ui/sessions/signin",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "3x-ui登录RackNerd2",
+      "url": "https://x.k222.netlib.re:2053/A2GJF/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "3x-ui登录RackNerd3",
+      "url": "https://x.t333.netlib.re:2053/XM9zKbh/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "3x-ui登录uqidc",
+      "url": "https://x.z111.netlib.re:2053/E36LXtky/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Sublink Worker 订阅转换",
+      "url": "https://x188.netlib.re/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Scamalytics – IP 风险评分",
+      "url": "https://scamalytics.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "国外VPS测评",
+      "url": "https://www.gwvpsceping.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Hugging Face",
+      "url": "https://huggingface.co/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Shopping Cart - VMISS",
+      "url": "https://app.vmiss.com/store/us-los-angeles-cmin2",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "VPS.TW.KVM.Lite - ByteVirt LLC",
+      "url": "https://bytevirt.com/store/vps-tw-kvm-lite",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Client Area - RackNerd LLC",
+      "url": "https://my.racknerd.com/clientarea.php?action=productdetails&id=384233",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Control Panel- RackNerd LLC",
+      "url": "https://nerdvm.racknerd.com/login.php",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "登录 | UQIDC",
+      "url": "https://www.uqidc.com/login",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "US.KG Domain Panel",
+      "url": "https://dash.domain.digitalplat.org/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "netlib.re 免费域名",
+      "url": "https://www.netlib.re/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "DNSHE 免费域名",
+      "url": "https://my.dnshe.com/clientarea.php",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "科赋锐信息科技Cloudflare | Cloudflare",
+      "url": "https://www.cloudflare-cn.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "最佳的CDN节点优选IP工具",
+      "url": "https://bulianglin.com/archives/cdn.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "SMS-Activate虚拟短信接收服务",
+      "url": "https://sms-activate.io/cn",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Speedtest by Ookla",
+      "url": "https://www.speedtest.net/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "LibreSpeed - Speed Test",
+      "url": "https://librespeed.org/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "灯塔",
+      "url": "https://dengta.cfd/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Neverinstall",
+      "url": "https://neverinstall.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "DeepSeek",
+      "url": "https://chat.deepseek.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Google AI Studio",
+      "url": "https://aistudio.google.com/prompts/new_chat",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Grok",
+      "url": "https://grok.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "ChatGPT",
+      "url": "https://chatgpt.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Twitch",
+      "url": "https://www.twitch.tv/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Watch Global & tv.garden",
+      "url": "https://tv.garden/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Pornhub",
+      "url": "https://cn.pornhub.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "XVIDEOS.COM",
+      "url": "https://www.xvideos.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "GitHub",
+      "url": "https://github.com/timeflysoon/img-installer",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "GitHub搜索“v2ray 节点”",
+      "url": "https://github.com/search?q=v2ray+%E8%8A%82%E7%82%B9&type=repositories&s=updated&o=desc",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "GitHub搜索“free v2ray”",
+      "url": "https://github.com/search?q=free+v2ray&type=repositories&s=updated&o=desc",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "FOFA 公益节点池",
+      "url": "https://fofa.info/result?qbase64=Ym9keT0i6Ieq5Yqo5oqT5Y%20WdGfpopHpgZPjgIHorqLpmIXlnLDlnYDjgIHlhazlvIDkupLogZTnvZHkuIrnmoRzc%20OAgXNzcuOAgXZtZXNz44CBdHJvamFu6IqC54K55L%20h5oGvIg%3D%3D",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Telegram: Set Language“大陆简中”",
+      "url": "https://t.me/setlanguage/classic-zh",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "图片转Excel表格在线",
+      "url": "https://web.baimiaoapp.com/image-to-excel",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Youtube 视频在线下载",
+      "url": "https://www.clipto.com/media-downloader/youtube-downloader",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "网页视频下载器-y2down.cc",
+      "url": "https://y2down.cc/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "鲁大师天梯榜",
+      "url": "http://www.ludashi.com/rank/cpuRanking.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "CPU性能排行榜-CPU天梯图",
+      "url": "https://cpu.bmcx.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Google 地球",
+      "url": "https://earth.google.com/web",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Google 地图",
+      "url": "https://maps.google.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "12321网络不良与垃圾信息举报受理中心",
+      "url": "http://12321.cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "腾讯首页",
+      "url": "http://www.qq.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "微博-随时随地发现新鲜事",
+      "url": "https://weibo.com/u/5288760004/home?wvr=5",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "首页-蓝乔-淘宝网",
+      "url": "https://shop598787767.taobao.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "中国工商银行中国网站",
+      "url": "http://www.icbc.com.cn/icbc/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "中国农业银行",
+      "url": "http://www.abchina.com/cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "中国邮政储蓄银行",
+      "url": "http://www.psbc.com/cn/index.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "CCTV-13新闻频道高清直播",
+      "url": "http://tv.cctv.com/live/cctv13/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Have I Been Pwned：查密码泄露",
+      "url": "https://haveibeenpwned.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "七加直播",
+      "url": "https://www.jq07.com/live?router=live&type=0&id=0&uid=136",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "198直播",
+      "url": "https://www.198zb4.com/liveRoomDetails?roomId=100467",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "斗球直播",
+      "url": "https://www.tbninduh.com/live/105726",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "龙珠直播",
+      "url": "https://www.longzhulive.com/live/259",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "咪咕视频",
+      "url": "https://www.miguvideo.com/mgs/website/prd/sportMatchDetail.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "爱奇艺体育",
+      "url": "https://sports.iqiyi.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "PP视频",
+      "url": "http://www.ppsport.com/schedules",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "哔哩哔哩-bilibili",
+      "url": "https://www.bilibili.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Greasy Fork-用户脚本",
+      "url": "https://greasyfork.org/zh-CN/scripts",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "在线闹钟",
+      "url": "http://www.naobiao.com/web_system/naobiao_com_www/api/iframe/baidu/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "易集",
+      "url": "http://m.yijee.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "日期计算器_时间天数在线查询转换工具",
+      "url": "https://www.ri7.com.cn/date-calculator/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "网址HTTP状态批量检测",
+      "url": "http://www.cjzzc.com/http_code.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "Witrn维简_U3L(Pro)",
+      "url": "https://www.witrn.com/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "正点原子-T80P",
+      "url": "https://www.alientek.com/Product_Details_12/17.html",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "菲尼瑞斯科技_FNIRSI内阻仪",
+      "url": "https://www.fnirsi.cn/",
+      "created": "2025-12-09T11:40:06.668Z"
+    },
+    {
+      "title": "大眼仔旭",
+      "url": "http://www.dayanzai.me/",
+      "created": "2025-12-09T11:40:06.668Z"
+    }
+  ],
+  "lastUpdated": "2025-12-09T11:40:22.913Z"
+}
+</div>
+
+<script>
+// === 核心数据存储 ===
+let bookmarks = [];
+let editingIndex = -1;
+
+// === 初始化：从当前HTML文件中读取数据 ===
+function loadDataFromCurrentFile() {
+    try {
+        const dataElement = document.getElementById('bookmarkData');
+        const dataText = dataElement.textContent.trim();
+        
+        if (dataText) {
+            // 从当前文件的数据存储区读取
+            const data = JSON.parse(dataText);
+            bookmarks = data.bookmarks || [];
+            console.log('从当前文件加载了', bookmarks.length, '条书签');
+        }
+        
+        // 无论是否有数据，都刷新列表
+        refreshList();
+    } catch (e) {
+        console.log('当前文件没有书签数据或数据格式错误，从空列表开始');
+        bookmarks = [];
+    }
+}
+
+// === 更新数据存储区（不保存到文件，只更新内存） ===
+function updateDataStorage() {
+    const data = {
+        bookmarks: bookmarks,
+        lastUpdated: new Date().toISOString()
+    };
+    document.getElementById('bookmarkData').textContent = JSON.stringify(data, null, 2);
+}
+
+// === 页面加载时初始化 ===
+document.addEventListener('DOMContentLoaded', function() {
+    loadDataFromCurrentFile();
+    setupFileEvents();
+});
+
+// === 列表显示 ===
+function refreshList() {
+    const listSection = document.getElementById('listSection');
+    const listElement = document.getElementById('bookmarkList');
+    
+    if (bookmarks.length === 0) {
+        listSection.style.display = 'none';
+        return;
+    }
+
+    listSection.style.display = 'block';
+    document.getElementById('itemCount').textContent = `(${bookmarks.length} 条)`;
+
+    listElement.innerHTML = bookmarks.map((item, index) => `
+        <li class="bookmark-item" data-index="${index}">
+            <div class="item-main">
+                <a href="${formatUrl(item.url)}" target="_blank" class="item-title">${escapeHtml(item.title)}</a>
+                <span class="item-url">${escapeHtml(item.url)}</span>
+            </div>
+            <div class="actions">
+                <button class="small-btn" onclick="editBookmark(${index})">编辑</button>
+                <button class="small-btn" onclick="deleteBookmark(${index})">删除</button>
+            </div>
+        </li>
+    `).join('');
+}
+
+function filterItems() {
+    const query = document.getElementById('searchInput').value.toLowerCase();
+    const items = document.querySelectorAll('.bookmark-item');
+    
+    items.forEach(item => {
+        const index = item.dataset.index;
+        const bookmark = bookmarks[index];
+        const text = `${bookmark.title} ${bookmark.url}`.toLowerCase();
+        item.style.display = text.includes(query) ? 'flex' : 'none';
+    });
+}
+
+// === 条目管理 ===
+function openAddDialog() {
+    editingIndex = -1;
+    document.getElementById('dialogTitle').textContent = '添加新书签';
+    document.getElementById('inputTitle').value = '';
+    document.getElementById('inputUrl').value = '';
+    document.getElementById('editDialog').style.display = 'block';
+}
+
+function editBookmark(index) {
+    editingIndex = index;
+    const item = bookmarks[index];
+    document.getElementById('dialogTitle').textContent = '编辑书签';
+    document.getElementById('inputTitle').value = item.title;
+    document.getElementById('inputUrl').value = item.url;
+    document.getElementById('editDialog').style.display = 'block';
+}
+
+function closeDialog() {
+    document.getElementById('editDialog').style.display = 'none';
+}
+
+function saveBookmark() {
+    const title = document.getElementById('inputTitle').value.trim();
+    let url = document.getElementById('inputUrl').value.trim();
+
+    if (!title || !url) {
+        alert('网站标题和网址是必填项！');
+        return;
+    }
+
+    // 规范化URL
+    if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+    }
+
+    const newItem = {
+        title: title,
+        url: url,
+        created: editingIndex === -1 ? new Date().toISOString() : bookmarks[editingIndex].created,
+        updated: new Date().toISOString()
+    };
+
+    if (editingIndex === -1) {
+        // 添加新条目
+        bookmarks.push(newItem);
+        showMessage('globalStatus', '已添加新书签', 'success');
+    } else {
+        // 更新现有条目
+        bookmarks[editingIndex] = newItem;
+        showMessage('globalStatus', '书签已更新', 'success');
+    }
+
+    // 更新内存中的数据存储区
+    updateDataStorage();
+    refreshList();
+    closeDialog();
+    
+    setTimeout(() => {
+        document.getElementById('globalStatus').classList.add('hidden');
+    }, 2000);
+}
+
+function deleteBookmark(index) {
+    if (confirm('确定要删除这个书签吗？')) {
+        bookmarks.splice(index, 1);
+        updateDataStorage();
+        refreshList();
+        showMessage('globalStatus', '书签已删除', 'info');
+        setTimeout(() => document.getElementById('globalStatus').classList.add('hidden'), 2000);
+    }
+}
+
+// === 导入功能 - 简化为一个按钮 ===
+function importHtmlFile() {
+    // 添加按钮点击效果
+    const btn = document.getElementById('importBtn');
+    const originalText = btn.textContent;
+    btn.textContent = '请选择HTML文件...';
+    btn.disabled = true;
+    
+    // 触发隐藏的文件输入框
+    const fileInput = document.getElementById('htmlFile');
+    fileInput.click();
+    
+    // 恢复按钮状态
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }, 1000);
+}
+
+function importHtml(htmlText) {
+    try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlText, 'text/html');
+        const links = doc.querySelectorAll('a[href]');
+        let added = 0;
+        let updated = 0;
+
+        links.forEach(link => {
+            let url = link.getAttribute('href');
+            if (!url || url.startsWith('javascript:') || url === '#') return;
+
+            if (!/^https?:\/\//i.test(url)) {
+                url = 'https://' + url;
+            }
+
+            const title = link.textContent.trim() || url;
+            
+            // 检查是否已存在
+            const existingIndex = bookmarks.findIndex(b => b.url === url);
+            if (existingIndex >= 0) {
+                // 已存在，更新标题
+                bookmarks[existingIndex].title = title;
+                bookmarks[existingIndex].updated = new Date().toISOString();
+                updated++;
+            } else {
+                // 不存在，新增
+                bookmarks.push({
+                    title: title,
+                    url: url,
+                    created: new Date().toISOString()
+                });
+                added++;
+            }
+        });
+
+        // 更新内存中的数据存储区
+        updateDataStorage();
+        refreshList();
+        showMessage('importStatus', `书签导入完成：新增 ${added} 条，更新 ${updated} 条`, 'success');
+
+    } catch (error) {
+        showMessage('importStatus', 'HTML解析失败: ' + error.message, 'error');
+    }
+}
+
+function setupFileEvents() {
+    document.getElementById('htmlFile').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                importHtml(event.target.result);
+                // 清空文件输入，以便下次可以选择同一个文件
+                e.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+    });
+}
+
+// === 核心：保存到文件功能 ===
+function saveToFile() {
+    if (bookmarks.length === 0) {
+        showMessage('globalStatus', '没有数据可保存', 'error');
+        return;
+    }
+
+    // 1. 更新数据存储区
+    updateDataStorage();
+    
+    // 2. 获取当前的完整HTML
+    let htmlContent = document.documentElement.outerHTML;
+    
+    // 3. 确保数据存储区是最新的
+    const data = {
+        bookmarks: bookmarks,
+        lastUpdated: new Date().toISOString()
+    };
+    const dataString = JSON.stringify(data, null, 2);
+    
+    // 4. 替换或添加数据存储区
+    if (htmlContent.includes('id="bookmarkData"')) {
+        // 替换现有的数据存储区
+        const regex = /<div id="bookmarkData" style="display:none">[\s\S]*?<\/div>/;
+        htmlContent = htmlContent.replace(regex, `<div id="bookmarkData" style="display:none">\n${dataString}\n</div>`);
+    } else {
+        // 在body末尾添加数据存储区
+        const bodyEnd = htmlContent.indexOf('</body>');
+        if (bodyEnd !== -1) {
+            htmlContent = htmlContent.substring(0, bodyEnd) + 
+                         `\n<div id="bookmarkData" style="display:none">\n${dataString}\n</div>\n` + 
+                         htmlContent.substring(bodyEnd);
+        }
+    }
+    
+    // 5. 生成带日期的文件名
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const fileName = `我的收藏夹_${year}-${month}-${day}.html`;
+    
+    // 6. 创建下载
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showMessage('globalStatus', `已保存到【${fileName}】文件中`, 'success');
+    setTimeout(() => document.getElementById('globalStatus').classList.add('hidden'), 3000);
+}
+
+// === 工具函数 ===
+function formatUrl(url) {
+    return url.startsWith('http') ? url : 'https://' + url;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showMessage(elementId, message, type) {
+    const element = document.getElementById(elementId);
+    element.textContent = message;
+    element.className = `status ${type}`;
+    element.classList.remove('hidden');
+    setTimeout(() => element.classList.add('hidden'), 4000);
+}
+
+function clearAllData() {
+    if (confirm('确定要清空所有数据吗？此操作不可撤销！')) {
+        bookmarks = [];
+        updateDataStorage();
+        refreshList();
+        showMessage('globalStatus', '所有数据已清空', 'info');
+    }
+}
+</script>
+
+
+</body></html>
