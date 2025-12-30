@@ -168,4 +168,9 @@ jobs:
 #    - 定时任务：每周日0点自动运行，默认清理所有已完成运行
 #    - 手动触发：可指定保留天数(0=全部清理)和仓库列表(逗号分隔)
 #    - 示例：repositories: user/repo1,user/repo2，keep_days: 7
+#
+# 4. 使用 AUTH_PAT - 可以直接复制到任何仓库
+#    secrets.AUTH_PAT
+#    使用 GITHUB_TOKEN - 仅限当前仓库，无跨项目权限
+#    secrets.GITHUB_TOKEN
 # ========================================
