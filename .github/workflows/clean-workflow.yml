@@ -289,6 +289,8 @@ jobs:
 # 2. 将 PAT 添加到仓库 Secrets：
 #    - 进入仓库 → Settings → Secrets and variables → Actions
 #    - 新建 Secret，名称：AUTH_PAT，值：粘贴刚才复制的 token
+#    - 在所有需要运行清理的仓库（如 temp, rule 等）都添加相同的 AUTH_PAT
+#    - 仓库的 Workflow permissions 只影响 GITHUB_TOKEN，不影响 AUTH_PAT
 #    
 # 3. 使用说明：
 #    - 定时任务：每周日0点自动运行，默认清理所有已完成运行
