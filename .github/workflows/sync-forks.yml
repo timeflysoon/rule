@@ -2,153 +2,120 @@ name: Sync Fork from Upstream
 
 on:
   schedule:
-    # 每天北京时间 03:00 和 15:00 自动运行（UTC 时间转换）
-    - cron: '0 19 * * *'  # UTC 19:00 = 北京时间 次日 03:00
-    - cron: '0 7 * * *'   # UTC 07:00 = 北京时间 当天 15:00
+    - cron: '0 19 * * *'  # UTC 19:00 = 北京时间次日 03:00
+    - cron: '0 7 * * *'   # UTC 07:00 = 北京时间当天 15:00
   workflow_dispatch:
     inputs:
       upstream_repos:
-        description: |
-          要同步的源仓库 (格式: owner/repo)
-          多个用逗号分隔，留空为当前仓库
-          输入 'all' 使用默认配置
+        description: '上游仓库 (格式: owner/repo)'
         required: false
         default: 'all'
-      target_repos:
-        description: |
-          要同步到的目标 Fork 仓库 (格式: your-username/repo)
-          多个用逗号分隔，留空为当前仓库
-          输入 'all' 同步所有已 Fork 仓库（需与上游仓库对应）
-        required: false
-        default: 'all'
-      force_sync:
-        description: '强制同步（忽略时间检查）'
-        type: boolean
-        default: false
 
-# 授予基础权限（核心权限由 PAT 提供）
 permissions:
   contents: write
-  pull-requests: read
 
 jobs:
-  sync-multi-repos-branches:
+  sync-repository:
     runs-on: ubuntu-latest
+    
     steps:
-      # 步骤1：配置 Git 身份（用于提交同步记录）
-      - name: Configure Git user
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      # 步骤2：定义默认上游仓库和目标仓库（核心配置：你的所有仓库）
-      - name: Set default repos (all)
-        id: set-repos
-        run: |
-          # 配置默认上游仓库（多个用逗号分隔，对应你的 Fork 源）
-          DEFAULT_UPSTREAM="timeflysoon/OpenClash"
-          # 配置默认目标仓库（你的所有 Fork 仓库，多个用逗号分隔）
-          DEFAULT_TARGET="your-username/OpenClash,your-username/other-repo1"  # 替换为你的仓库
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Git
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        
+    - name: Configure Git credentials
+      run: |
+        # 设置 Git 凭证存储
+        git config --global credential.helper store
+        echo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
+        
+    - name: Setup upstream
+      id: setup-upstream
+      run: |
+        echo "设置上游仓库..."
+        
+        # 设置默认上游为 vernesong/OpenClash
+        UPSTREAM_REPO="vernesong/OpenClash"
+        echo "upstream_repo=$UPSTREAM_REPO" >> $GITHUB_OUTPUT
+        echo "使用上游: $UPSTREAM_REPO"
+        
+    - name: Sync all branches
+      env:
+        UPSTREAM_REPO: ${{ steps.setup-upstream.outputs.upstream_repo }}
+      run: |
+        echo "开始同步上游仓库: $UPSTREAM_REPO"
+        
+        # 添加或更新上游远程
+        git remote add upstream "https://github.com/$UPSTREAM_REPO.git" 2>/dev/null || \
+          git remote set-url upstream "https://github.com/$UPSTREAM_REPO.git"
+        
+        # 显示远程信息
+        echo "当前远程仓库:"
+        git remote -v
+        
+        # 获取上游所有分支
+        echo "获取上游分支..."
+        git fetch upstream --prune
+        
+        # 获取所有分支列表
+        echo "上游分支列表:"
+        git branch -r
+        
+        # 获取上游分支（排除HEAD）
+        UPSTREAM_BRANCHES=$(git branch -r | grep 'upstream/' | grep -v HEAD)
+        echo "找到的分支: $UPSTREAM_BRANCHES"
+        
+        # 如果没有分支，退出
+        if [ -z "$UPSTREAM_BRANCHES" ]; then
+          echo "没有找到上游分支"
+          exit 0
+        fi
+        
+        # 同步每个分支
+        for BRANCH in $UPSTREAM_BRANCHES; do
+          # 清理分支名
+          BRANCH_NAME=$(echo "$BRANCH" | sed 's/upstream\///' | xargs)
           
-          # 处理上游仓库参数
-          INPUT_UPSTREAM="${{ github.event.inputs.upstream_repos }}"
-          if [[ "$INPUT_UPSTREAM" == "all" ]]; then
-            UPSTREAM_REPOS="$DEFAULT_UPSTREAM"
-          elif [[ -z "$INPUT_UPSTREAM" ]]; then
-            UPSTREAM_REPOS="${{ github.repository }}"
-          else
-            UPSTREAM_REPOS="$INPUT_UPSTREAM"
+          if [ -z "$BRANCH_NAME" ]; then
+            continue
           fi
           
-          # 处理目标仓库参数
-          INPUT_TARGET="${{ github.event.inputs.target_repos }}"
-          if [[ "$INPUT_TARGET" == "all" ]]; then
-            TARGET_REPOS="$DEFAULT_TARGET"
-          elif [[ -z "$INPUT_TARGET" ]]; then
-            TARGET_REPOS="${{ github.repository }}"
+          echo "处理分支: $BRANCH_NAME"
+          
+          # 检查本地是否存在该分支
+          if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+            echo "分支已存在，切换到 $BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+            
+            # 拉取上游更新
+            echo "拉取上游更新..."
+            git pull upstream "$BRANCH_NAME" --no-rebase
           else
-            TARGET_REPOS="$INPUT_TARGET"
+            echo "创建新分支: $BRANCH_NAME"
+            git checkout -b "$BRANCH_NAME" "upstream/$BRANCH_NAME"
           fi
           
-          # 输出到环境变量
-          echo "UPSTREAM_REPOS=$UPSTREAM_REPOS" >> $GITHUB_ENV
-          echo "TARGET_REPOS=$TARGET_REPOS" >> $GITHUB_ENV
-
-      # 步骤3：循环同步所有目标仓库（基于 PAT 跨仓库权限）
-      - name: Sync all branches for multi repos (cross-repo)
-        env:
-          # 引用配置的 Repository Secrets 中的 PAT（名称需与你配置的一致）
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: |
-          # 分割上游仓库和目标仓库列表（逗号分隔）
-          IFS=',' read -ra UPSTREAM_LIST <<< "$UPSTREAM_REPOS"
-          IFS=',' read -ra TARGET_LIST <<< "$TARGET_REPOS"
+          # 推送更新
+          echo "推送到 origin..."
+          git push origin "$BRANCH_NAME"
           
-          # 循环遍历所有目标仓库（跨仓库核心逻辑）
-          for TARGET in "${TARGET_LIST[@]}"; do
-            TARGET=$(echo "$TARGET" | xargs)
-            echo "======================================"
-            echo "Starting to handle target repo: $TARGET"
-            echo "======================================"
-            
-            # 1. 使用 PAT 克隆目标仓库（支持跨仓库访问，替换默认 token）
-            TARGET_CLONE_URL="https://$GITHUB_ACTOR:$PERSONAL_ACCESS_TOKEN@github.com/$TARGET.git"
-            git clone --mirror "$TARGET_CLONE_URL" target-repo-mirror
-            cd target-repo-mirror
-            
-            # 2. 循环同步每个上游仓库到当前目标仓库
-            for UPSTREAM in "${UPSTREAM_LIST[@]}"; do
-              UPSTREAM=$(echo "$UPSTREAM" | xargs)
-              echo "--------------------------------------"
-              echo "Syncing $TARGET from upstream: $UPSTREAM"
-              echo "--------------------------------------"
-              
-              # 添加上游仓库远程地址（带 PAT 保证访问权限）
-              UPSTREAM_REMOTE="upstream-$UPSTREAM"
-              UPSTREAM_URL="https://$GITHUB_ACTOR:$PERSONAL_ACCESS_TOKEN@github.com/$UPSTREAM.git"
-              if git remote | grep -q "$UPSTREAM_REMOTE"; then
-                git remote set-url "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
-              else
-                git remote add "$UPSTREAM_REMOTE" "$UPSTREAM_URL"
-              fi
-              
-              # 拉取上游仓库所有分支、标签（清理无效分支）
-              git fetch "$UPSTREAM_REMOTE" --tags --prune
-              
-              # 获取上游所有分支并同步
-              UPSTREAM_BRANCHES=$(git branch -r | grep "$UPSTREAM_REMOTE/" | grep -v HEAD | sed "s|$UPSTREAM_REMOTE/||g")
-              for BRANCH in $UPSTREAM_BRANCHES; do
-                echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-                echo "Syncing branch $BRANCH for $TARGET"
-                echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-                
-                # 切换/创建分支并同步
-                if git rev-parse --verify "$BRANCH" >/dev/null 2>&1; then
-                  git checkout "$BRANCH"
-                else
-                  git checkout -b "$BRANCH" "$UPSTREAM_REMOTE/$BRANCH"
-                fi
-                
-                # 合并/强制同步上游分支
-                if [[ "${{ github.event.inputs.force_sync }}" == "true" ]]; then
-                  git reset --hard "$UPSTREAM_REMOTE/$BRANCH"
-                  echo "Force synced branch $BRANCH"
-                else
-                  git merge --ff-only "$UPSTREAM_REMOTE/$BRANCH"
-                  echo "Fast-forward merged branch $BRANCH"
-                fi
-              done
-              
-              # 3. 推送所有同步后的分支、标签到目标仓库（跨仓库推送，依赖 PAT 权限）
-              git push --all origin
-              git push --tags origin
-            done
-            
-            # 退出镜像仓库目录，清理下一个目标仓库
-            cd ..
-            rm -rf target-repo-mirror
-          done
-          
-          echo "======================================"
-          echo "All repos and branches sync completed successfully!"
-          echo "======================================"
+          echo "✅ 分支 $BRANCH_NAME 同步完成"
+        done
+        
+        echo "🎉 所有分支同步完成"
+        
+    - name: Create summary
+      if: always()
+      run: |
+        echo "## 上游同步报告" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**仓库:** ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
+        echo "**上游:** vernesong/OpenClash" >> $GITHUB_STEP_SUMMARY
+        echo "**同步时间:** $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+        echo "**状态:** ✅ 同步任务已执行" >> $GITHUB_STEP_SUMMARY
