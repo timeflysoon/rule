@@ -1,0 +1,285 @@
+name: Sync Multiple Repositories
+
+on:
+  schedule:
+    # 每天北京时间 03:00 和 15:00 自动运行，默认同步所有fork仓库
+    - cron: '0 19 * * *'  # UTC 19:00 = 北京时间次日 03:00
+    - cron: '0 7 * * *'   # UTC 07:00 = 北京时间当天 15:00
+  workflow_dispatch:
+    inputs:
+      repositories:
+        description: |
+          要同步的仓库（格式：owner/repo，多个用逗号分隔）
+          留空：仅同步当前仓库
+          输入 'all'：同步所有fork仓库
+          默认：空（仅当前仓库）
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  sync-repositories:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 安装依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+        
+    - name: 确定同步模式
+      id: determine-mode
+      run: |
+        echo "触发事件: ${{ github.event_name }}"
+        
+        if [ "${{ github.event_name }}" = "schedule" ]; then
+          # 定时任务：默认同步所有fork仓库
+          echo "🕐 定时任务触发，使用 'all' 模式"
+          echo "mode=all" >> $GITHUB_OUTPUT
+          echo "repositories_input=all" >> $GITHUB_OUTPUT
+        else
+          # 手动触发：使用用户输入
+          USER_INPUT="${{ github.event.inputs.repositories }}"
+          echo "👆 手动触发，用户输入: '$USER_INPUT'"
+          
+          if [ -z "$USER_INPUT" ]; then
+            echo "用户输入为空，同步当前仓库"
+            echo "mode=current" >> $GITHUB_OUTPUT
+            echo "repositories_input=${{ github.repository }}" >> $GITHUB_OUTPUT
+          elif [ "$USER_INPUT" = "all" ]; then
+            echo "用户输入 'all'，同步所有fork仓库"
+            echo "mode=all" >> $GITHUB_OUTPUT
+            echo "repositories_input=all" >> $GITHUB_OUTPUT
+          else
+            echo "用户指定仓库: $USER_INPUT"
+            echo "mode=manual" >> $GITHUB_OUTPUT
+            echo "repositories_input=$USER_INPUT" >> $GITHUB_OUTPUT
+          fi
+        fi
+        
+    - name: 获取所有fork仓库列表（如果是all模式）
+      if: steps.determine-mode.outputs.mode == 'all'
+      id: get-all-fork-repos
+      env:
+        GH_TOKEN: ${{ secrets.AUTH_PAT }}
+      run: |
+        echo "🔍 正在获取您所有的fork仓库..."
+        
+        page=1
+        ALL_FORK_REPOS=""
+        
+        while true; do
+          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                        "https://api.github.com/user/repos?per_page=100&page=$page&affiliation=owner&sort=full_name")
+          
+          # 提取fork仓库
+          FORK_REPOS=$(echo "$RESPONSE" | jq -r '.[] | select(.fork == true) | .full_name' | tr '\n' ',')
+          
+          if [ -z "$FORK_REPOS" ] || [ "$FORK_REPOS" = "" ]; then
+            break
+          fi
+          
+          ALL_FORK_REPOS="${ALL_FORK_REPOS}${FORK_REPOS}"
+          page=$((page + 1))
+          
+          echo "📊 已获取 $(( (page-1) * 100 )) 个仓库..."
+          
+          if [ $page -gt 10 ]; then
+            echo "⚠️ 已获取 1000 个仓库，如需更多请调整限制"
+            break
+          fi
+          
+          sleep 0.5
+        done
+        
+        ALL_FORK_REPOS=${ALL_FORK_REPOS%,}
+        REPO_COUNT=$(echo "$ALL_FORK_REPOS" | tr ',' '\n' | wc -l)
+        
+        echo "fork_repositories=$ALL_FORK_REPOS" >> $GITHUB_OUTPUT
+        echo "✅ 共找到 $REPO_COUNT 个fork仓库"
+        
+    - name: 准备仓库列表
+      id: prepare-repos
+      run: |
+        MODE="${{ steps.determine-mode.outputs.mode }}"
+        REPOS_INPUT="${{ steps.determine-mode.outputs.repositories_input }}"
+        
+        echo "准备模式: $MODE"
+        echo "输入: $REPOS_INPUT"
+        
+        if [ "$MODE" = "all" ]; then
+          # 使用所有fork仓库
+          FINAL_REPOS="${{ steps.get-all-fork-repos.outputs.fork_repositories }}"
+          echo "🚀 将同步所有fork仓库 ($FINAL_REPOS)"
+        elif [ "$MODE" = "current" ]; then
+          # 仅当前仓库
+          FINAL_REPOS="$REPOS_INPUT"
+          echo "📍 将同步当前仓库: $FINAL_REPOS"
+        else
+          # 手动指定的仓库
+          FINAL_REPOS="$REPOS_INPUT"
+          echo "🎯 将同步指定仓库: $FINAL_REPOS"
+        fi
+        
+        # 清理格式
+        FINAL_REPOS=$(echo "$FINAL_REPOS" | tr -d ' ' | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+        
+        echo "repositories=$FINAL_REPOS" >> $GITHUB_OUTPUT
+        
+    - name: 同步仓库
+      env:
+        REPOSITORIES: ${{ steps.prepare-repos.outputs.repositories }}
+        GH_TOKEN: ${{ secrets.AUTH_PAT }}
+      run: |
+        echo "🚀 开始同步仓库..."
+        echo "仓库列表: $REPOSITORIES"
+        
+        if [ -z "$REPOSITORIES" ]; then
+          echo "❌ 错误：未指定要同步的仓库"
+          exit 1
+        fi
+        
+        IFS=',' read -ra REPO_ARRAY <<< "$REPOSITORIES"
+        
+        SYNC_SUCCESS=0
+        SYNC_SKIP=0
+        SYNC_FAILED=0
+        
+        for FORK_REPO in "${REPO_ARRAY[@]}"; do
+          echo ""
+          echo "========================================"
+          echo "🔄 同步仓库 ($((SYNC_SUCCESS + SYNC_SKIP + SYNC_FAILED + 1))/${#REPO_ARRAY[@]}): $FORK_REPO"
+          echo "========================================"
+          
+          # 1. 获取fork仓库的上游信息
+          echo "📡 获取仓库信息..."
+          REPO_INFO=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                      "https://api.github.com/repos/$FORK_REPO")
+          
+          PARENT_REPO=$(echo "$REPO_INFO" | jq -r '.parent.full_name // empty')
+          
+          if [ -z "$PARENT_REPO" ] || [ "$PARENT_REPO" = "null" ]; then
+            echo "⚠️  $FORK_REPO 不是fork仓库或无法获取上游，跳过"
+            SYNC_SKIP=$((SYNC_SKIP + 1))
+            continue
+          fi
+          
+          echo "✅ 上游仓库: $PARENT_REPO"
+          
+          # 2. 创建临时目录
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+          
+          # 3. 克隆fork仓库（使用PAT）
+          echo "📥 克隆fork仓库..."
+          if ! git clone "https://x-access-token:$GH_TOKEN@github.com/$FORK_REPO.git" . 2>/dev/null; then
+            echo "❌ 克隆仓库失败，可能没有权限"
+            cd /
+            rm -rf "$TEMP_DIR"
+            SYNC_FAILED=$((SYNC_FAILED + 1))
+            continue
+          fi
+          
+          # 4. 设置Git用户
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          
+          # 5. 添加上游远程
+          echo "🔗 添加上游仓库..."
+          git remote add upstream "https://github.com/$PARENT_REPO.git"
+          
+          # 6. 获取所有上游分支
+          echo "📡 获取上游分支..."
+          if ! git fetch upstream 2>/dev/null; then
+            echo "❌ 获取上游分支失败，可能上游仓库不存在"
+            cd /
+            rm -rf "$TEMP_DIR"
+            SYNC_FAILED=$((SYNC_FAILED + 1))
+            continue
+          fi
+          
+          # 7. 获取所有分支
+          BRANCHES=$(git branch -r | grep 'upstream/' | sed 's/upstream\///' | grep -v HEAD)
+          
+          if [ -z "$BRANCHES" ]; then
+            echo "⚠️ 未找到分支，跳过"
+            cd /
+            rm -rf "$TEMP_DIR"
+            SYNC_SKIP=$((SYNC_SKIP + 1))
+            continue
+          fi
+          
+          echo "🌿 找到分支: $BRANCHES"
+          
+          # 8. 保存当前分支
+          ORIG_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+          
+          # 9. 同步每个分支
+          for BRANCH in $BRANCHES; do
+            BRANCH=$(echo "$BRANCH" | xargs)
+            [ -z "$BRANCH" ] && continue
+            
+            echo "  处理分支: $BRANCH"
+            
+            # 检查分支是否存在
+            if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+              git checkout "$BRANCH"
+              echo "  拉取上游更新..."
+              if ! git pull upstream "$BRANCH" --no-rebase 2>/dev/null; then
+                echo "  ⚠️ 拉取失败，尝试强制同步"
+                git reset --hard "upstream/$BRANCH"
+              fi
+            else
+              git checkout -b "$BRANCH" "upstream/$BRANCH"
+            fi
+            
+            # 推送到fork仓库
+            echo "  推送到 $FORK_REPO..."
+            if ! git push origin "$BRANCH" 2>/dev/null; then
+              echo "  ❌ 推送失败"
+            else
+              echo "  ✅ 推送成功"
+            fi
+          done
+          
+          # 10. 清理
+          cd /
+          rm -rf "$TEMP_DIR"
+          
+          echo "✅ $FORK_REPO 同步完成"
+          SYNC_SUCCESS=$((SYNC_SUCCESS + 1))
+        done
+        
+        echo ""
+        echo "🎉 同步完成！"
+        echo "📊 统计："
+        echo "  ✅ 成功: $SYNC_SUCCESS"
+        echo "  ⏭️ 跳过: $SYNC_SKIP"
+        echo "  ❌ 失败: $SYNC_FAILED"
+        
+    - name: 生成报告
+      if: always()
+      env:
+        MODE: ${{ steps.determine-mode.outputs.mode }}
+        SYNC_COUNT: ${{ fromJSON(steps.prepare-repos.outputs.repositories != '' && '[' + steps.prepare-repos.outputs.repositories + ']' || '[]') && length(fromJSON('[' + steps.prepare-repos.outputs.repositories + ']')) || 0 }}
+      run: |
+        echo "## 📊 仓库同步报告" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**同步时间:** $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+        echo "**触发方式:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "**同步模式:** $MODE" >> $GITHUB_STEP_SUMMARY
+        echo "**目标仓库数:** $SYNC_COUNT 个" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if ${{ job.status == 'success' }}; then
+          echo "**状态:** ✅ 同步任务执行成功" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> 下一次定时同步时间：" >> $GITHUB_STEP_SUMMARY
+          echo "> - 北京时间 03:00（UTC 前一天 19:00）" >> $GITHUB_STEP_SUMMARY
+          echo "> - 北京时间 15:00（UTC 当天 07:00）" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "**状态:** ⚠️ 同步任务执行过程中出现问题" >> $GITHUB_STEP_SUMMARY
+          echo "请查看详细日志了解错误信息。" >> $GITHUB_STEP_SUMMARY
+        fi
