@@ -14,7 +14,7 @@ on:
           all - 更新所有fork仓库
           指定 - owner/repo,owner2/repo2
         required: false
-        default: ""
+        default: "all"
 
 permissions:
   contents: read
