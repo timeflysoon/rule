@@ -1,4 +1,3 @@
-DOMAIN-SUFFIX,cn.eset.com
 DOMAIN-SUFFIX,kaspersky.com.cn
 DOMAIN,activation-v2.kaspersky.com
 DOMAIN,activation-v2.geo.kaspersky.com
@@ -96,3 +95,4 @@ DOMAIN,s16.upd.kaspersky.com
 DOMAIN,s17.upd.kaspersky.com
 DOMAIN,s18.upd.kaspersky.com
 DOMAIN,s19.upd.kaspersky.com
+DOMAIN-SUFFIX,cn.eset.com

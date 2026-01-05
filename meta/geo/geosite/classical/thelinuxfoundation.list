@@ -1,8 +1,6 @@
 DOMAIN,amp.akamaized.net
 DOMAIN-SUFFIX,lfai.foundation
 DOMAIN-SUFFIX,linuxfoundation.org
-DOMAIN-SUFFIX,kernel.org
-DOMAIN-SUFFIX,linux.org
 DOMAIN-SUFFIX,openjsf.org
 DOMAIN-SUFFIX,amp.dev
 DOMAIN-SUFFIX,ampproject.com
@@ -14,4 +12,6 @@ DOMAIN-SUFFIX,jquerymobile.com
 DOMAIN-SUFFIX,jqueryui.com
 DOMAIN-SUFFIX,mochajs.org
 DOMAIN-SUFFIX,nodejs.org
+DOMAIN-SUFFIX,kernel.org
+DOMAIN-SUFFIX,linux.org
 DOMAIN,cdn.ampproject.org

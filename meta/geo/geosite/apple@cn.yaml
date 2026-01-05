@@ -259,24 +259,6 @@ payload:
     - www.apple.com
     - www.apple.com.edgekey.net.globalredir.akadns.net
     - xp.apple.com
-    - +.researchkit.cn
-    - +.researchkit.com.cn
-    - +.swiftui.cn
-    - +.swiftui.com.cn
-    - +.beats1.cn
-    - +.beats1.com.cn
-    - +.beats2.com.cn
-    - +.beats4.cn
-    - +.beatsbydre.com
-    - +.beatsbydre.com.cn
-    - +.beatsep.cn
-    - +.apple-itunes.cn
-    - +.itunes-apple.cn
-    - +.itunesapple.cn
-    - +.itunesradio.cn
-    - +.itunesradio.com.cn
-    - +.swiftui.cn
-    - +.swiftui.com.cn
     - certs-lb.apple.com.akadns.net
     - certs.apple.com
     - crl-lb.apple.com.akadns.net
@@ -286,9 +268,27 @@ payload:
     - ocsp2-lb.apple.com.akadns.net
     - ocsp2.apple.com
     - valid.apple.com
+    - +.beats1.cn
+    - +.beats1.com.cn
+    - +.beats2.com.cn
+    - +.beats4.cn
+    - +.beatsbydre.com
+    - +.beatsbydre.com.cn
+    - +.beatsep.cn
     - +.apple-icloud.cn
     - +.appleicloud.cn
     - +.icloud-apple.cn
     - +.icloud.com.cn
     - +.icloud.net.cn
     - +.icloudapple.cn
+    - +.swiftui.cn
+    - +.swiftui.com.cn
+    - +.researchkit.cn
+    - +.researchkit.com.cn
+    - +.swiftui.cn
+    - +.swiftui.com.cn
+    - +.apple-itunes.cn
+    - +.itunes-apple.cn
+    - +.itunesapple.cn
+    - +.itunesradio.cn
+    - +.itunesradio.com.cn

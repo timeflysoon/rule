@@ -4,8 +4,6 @@ payload:
     - +.llama.com
     - +.meta.ai
     - +.meta.com
-    - +.threads.com
-    - +.threads.net
     - +.wa.me
     - +.whatsapp-plus.info
     - +.whatsapp-plus.me
@@ -545,6 +543,8 @@ payload:
     - +.oculusrift.com
     - +.oculusvr.com
     - +.powersunitedvr.com
+    - +.threads.com
+    - +.threads.net
     - +.graph.whatsapp.com
     - +.graph.whatsapp.net
     - +.graph.instagram.com

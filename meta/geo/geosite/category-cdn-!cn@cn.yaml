@@ -1,4 +1,15 @@
 payload:
+    - +.accdn.com.cn
+    - +.akadns88.net
+    - +.akadns99.net
+    - +.akamai.com
+    - +.akcdn.com.cn
+    - +.aptdn.net
+    - +.edgekey88.net
+    - +.janrain.biz
+    - +.janrainservices.com
+    - +.skycdn.com.cn
+    - +.tl88.net
     - +.cf-china.info
     - +.cf-ns.com
     - +.cf-ns.net
@@ -18,14 +29,3 @@ payload:
     - +.cloudflareprod.com
     - +.cloudflarestaging.com
     - +.cloudflarestoragegw.com
-    - +.accdn.com.cn
-    - +.akadns88.net
-    - +.akadns99.net
-    - +.akamai.com
-    - +.akcdn.com.cn
-    - +.aptdn.net
-    - +.edgekey88.net
-    - +.janrain.biz
-    - +.janrainservices.com
-    - +.skycdn.com.cn
-    - +.tl88.net

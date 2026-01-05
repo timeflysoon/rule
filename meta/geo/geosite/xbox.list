@@ -1,5 +1,5 @@
-flightsimulator.azureedge.net
 prodforza.blob.core.windows.net
+flightsimulator.azureedge.net
 +.xbox
 +.gamepass.com
 +.orithegame.com
@@ -24,8 +24,6 @@ prodforza.blob.core.windows.net
 +.xboxservices.com
 +.xboxstudios.com
 +.xbx.lv
-+.asobostudio.com
-+.flightsimulator.com
 +.beth.games
 +.bethesda.net
 +.bethesdagamestudios.com
@@ -42,4 +40,6 @@ prodforza.blob.core.windows.net
 +.minecraftservices.com
 +.minecraftshop.com
 +.mojang.com
++.asobostudio.com
++.flightsimulator.com
 +.xboxlive.cn
