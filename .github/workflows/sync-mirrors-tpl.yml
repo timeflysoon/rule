@@ -47,10 +47,10 @@ jobs:
           
           # 定义内部映射表 (Owner -> [Host别名, 私钥文件名, GitHub Secret名])
           declare -A SSH_MAP
-          SSH_MAP[timeflysoon]="github-t id_ed25519_t SSH_PRIVATE_KEY_T"
-          SSH_MAP[88alt]="github-x1 id_ed25519_x1 SSH_PRIVATE_KEY_X1"
-          SSH_MAP[88top]="github-u6 id_ed25519_u6 SSH_PRIVATE_KEY_U6"
-          SSH_MAP[88sys]="github-x6 id_ed25519_x6 SSH_PRIVATE_KEY_X6"
+          SSH_MAP[timeflysoon]="github-timeflysoon id_ed25519_timeflysoon SSH_PRIVATE_KEY_TIMEFLYSOON"
+          SSH_MAP[88alt]="github-88alt id_ed25519_88alt SSH_PRIVATE_KEY_88ALT"
+          SSH_MAP[88top]="github-88top id_ed25519_88top SSH_PRIVATE_KEY_88TOP"
+          SSH_MAP[88sys]="github-88sys id_ed25519_88sys SSH_PRIVATE_KEY_88SYS"
           
           # 提取输入的目标仓库所有者
           OWNER_1=$(echo "${{ github.event.inputs.target_repo_1 }}" | cut -d'/' -f1)
@@ -80,17 +80,17 @@ jobs:
           
           # 根据不同的SECRET_1值选择对应的GitHub Secret
           case "$SECRET_1" in
-            SSH_PRIVATE_KEY_T)
-              echo "${{ secrets.SSH_PRIVATE_KEY_T }}" > ~/.ssh/$KEY_1
+            SSH_PRIVATE_KEY_TIMEFLYSOON)
+              echo "${{ secrets.SSH_PRIVATE_KEY_TIMEFLYSOON }}" > ~/.ssh/$KEY_1
               ;;
-            SSH_PRIVATE_KEY_X1)
-              echo "${{ secrets.SSH_PRIVATE_KEY_X1 }}" > ~/.ssh/$KEY_1
+            SSH_PRIVATE_KEY_88ALT)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88ALT }}" > ~/.ssh/$KEY_1
               ;;
-            SSH_PRIVATE_KEY_U6)
-              echo "${{ secrets.SSH_PRIVATE_KEY_U6 }}" > ~/.ssh/$KEY_1
+            SSH_PRIVATE_KEY_88TOP)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88TOP }}" > ~/.ssh/$KEY_1
               ;;
-            SSH_PRIVATE_KEY_X6)
-              echo "${{ secrets.SSH_PRIVATE_KEY_X6 }}" > ~/.ssh/$KEY_1
+            SSH_PRIVATE_KEY_88SYS)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88SYS }}" > ~/.ssh/$KEY_1
               ;;
             *)
               echo "❌ 错误：未知的Secret名称 '$SECRET_1'"
@@ -100,17 +100,17 @@ jobs:
           
           # 根据不同的SECRET_2值选择对应的GitHub Secret
           case "$SECRET_2" in
-            SSH_PRIVATE_KEY_T)
-              echo "${{ secrets.SSH_PRIVATE_KEY_T }}" > ~/.ssh/$KEY_2
+            SSH_PRIVATE_KEY_TIMEFLYSOON)
+              echo "${{ secrets.SSH_PRIVATE_KEY_TIMEFLYSOON }}" > ~/.ssh/$KEY_2
               ;;
-            SSH_PRIVATE_KEY_X1)
-              echo "${{ secrets.SSH_PRIVATE_KEY_X1 }}" > ~/.ssh/$KEY_2
+            SSH_PRIVATE_KEY_88ALT)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88ALT }}" > ~/.ssh/$KEY_2
               ;;
-            SSH_PRIVATE_KEY_U6)
-              echo "${{ secrets.SSH_PRIVATE_KEY_U6 }}" > ~/.ssh/$KEY_2
+            SSH_PRIVATE_KEY_88TOP)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88TOP }}" > ~/.ssh/$KEY_2
               ;;
-            SSH_PRIVATE_KEY_X6)
-              echo "${{ secrets.SSH_PRIVATE_KEY_X6 }}" > ~/.ssh/$KEY_2
+            SSH_PRIVATE_KEY_88SYS)
+              echo "${{ secrets.SSH_PRIVATE_KEY_88SYS }}" > ~/.ssh/$KEY_2
               ;;
             *)
               echo "❌ 错误：未知的Secret名称 '$SECRET_2'"
@@ -122,7 +122,7 @@ jobs:
           
           # 动态生成 SSH Config
           cat > ~/.ssh/config << EOF
-          # 目标仓库1 ($OWNER_1) | Deploy Key标题: github-actions-sync-${KEY_1##*-}
+          # 目标仓库1 ($OWNER_1) | Deploy Key标题: github-actions-sync-${OWNER_1}
           Host $HOST_1
             HostName github.com
             User git
@@ -130,7 +130,7 @@ jobs:
             IdentitiesOnly yes
             StrictHostKeyChecking no
           
-          # 目标仓库2 ($OWNER_2) | Deploy Key标题: github-actions-sync-${KEY_2##*-}
+          # 目标仓库2 ($OWNER_2) | Deploy Key标题: github-actions-sync-${OWNER_2}
           Host $HOST_2
             HostName github.com
             User git
@@ -285,10 +285,10 @@ jobs:
           
           # 根据映射表清理对应的私钥文件
           declare -A SSH_MAP
-          SSH_MAP[timeflysoon]="id_ed25519_t"
-          SSH_MAP[88alt]="id_ed25519_x1"
-          SSH_MAP[88top]="id_ed25519_u6"
-          SSH_MAP[88sys]="id_ed25519_x6"
+          SSH_MAP[timeflysoon]="id_ed25519_timeflysoon"
+          SSH_MAP[88alt]="id_ed25519_88alt"
+          SSH_MAP[88top]="id_ed25519_88top"
+          SSH_MAP[88sys]="id_ed25519_88sys"
           
           KEY_1="${SSH_MAP[$TARGET_1_OWNER]}"
           KEY_2="${SSH_MAP[$TARGET_2_OWNER]}"
