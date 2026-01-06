@@ -1,19 +1,16 @@
-# 文件名: .github/workflows/sync-meta.yml
-# 日常使用的同步工作流 - 与源仓库完全一致
+# 文件名: .github/workflows/delete-meta-folder.yml
+# 删除 meta 文件夹工作流
 
-name: Sync Meta Folders Only
+name: Delete Meta Folder
 
 on:
-  schedule:
-    - cron: '30 18 * * *'  # UTC 18:30 = 北京时间第二天 2:30
-    - cron: '30 6 * * *'   # UTC 6:30 = 北京时间 14:30
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:  # 仅手动触发
 
 permissions:
   contents: write
 
 jobs:
-  sync:
+  delete-meta:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     
@@ -29,168 +26,70 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Delete meta directory
+      - name: Delete meta folder
         run: |
-          echo "🗑️  删除 meta 目录..."
-          rm -rf meta
+          echo "🗑️  删除 meta 文件夹..."
           
-          # 确认删除
-          if [ ! -d "meta" ]; then
+          if [ -d "meta" ]; then
+            echo "找到 meta 目录，正在删除..."
+            rm -rf meta
             echo "✅ meta 目录已删除"
           else
-            echo "❌ meta 目录删除失败"
+            echo "ℹ️  meta 目录不存在，无需删除"
           fi
 
-      - name: Clone source repository directly to meta directory
-        run: |
-          echo "📥 直接克隆源仓库到 meta 目录..."
-          
-          # 直接克隆源仓库到 meta 目录
-          git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git meta
-          
-          echo "克隆完成，清理不需要的文件..."
-          
-          # 删除源仓库的 .git 目录
-          rm -rf meta/.git
-          
-          echo "✅ 直接克隆完成"
-
-      - name: Verify cloned content
-        run: |
-          echo "🔍 验证克隆内容..."
-          
-          echo "meta 目录内容:"
-          ls -la meta/
-          
-          echo ""
-          echo "各目录详情:"
-          for dir in meta/*/; do
-            if [ -d "$dir" ]; then
-              dir_name=$(basename "$dir")
-              file_count=$(find "$dir" -type f | wc -l)
-              echo "  📁 $dir_name: $file_count 个文件"
-            fi
-          done
-
-      - name: Remove any .dat files
-        run: |
-          echo "🔍 检查 .dat 文件..."
-          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
-          if [ "$DAT_FILES" -gt 0 ]; then
-            echo "发现 $DAT_FILES 个 .dat 文件，正在删除..."
-            find meta -name "*.dat" -type f -delete
-            echo "✅ 已删除 .dat 文件"
-          else
-            echo "✓ 没有 .dat 文件"
-          fi
-
-      - name: Check for git changes
-        id: check_git
+      - name: Check if there are changes
+        id: check_changes
         run: |
           echo "📊 检查 Git 变化..."
           
-          # 添加所有变化
           git add -A
           
-          # 检查是否有待提交的更改
           if git diff --cached --quiet; then
-            echo "ℹ️  没有检测到 Git 变化"
+            echo "没有检测到变化"
             echo "has_changes=false" >> $GITHUB_OUTPUT
           else
-            CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
-            echo "📝 检测到 $CHANGED_COUNT 个文件变化"
+            echo "检测到变化"
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
-            
-            echo "变化文件列表:"
-            git diff --cached --name-only | head -10
           fi
 
-      - name: Commit and push changes
-        if: steps.check_git.outputs.has_changes == 'true'
+      - name: Commit and push if changes
+        if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          CHANGED_COUNT="${{ steps.check_git.outputs.changed_count }}"
           
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SYNC_TYPE="手动同步"
-          else
-            SYNC_TYPE="定时同步"
-          fi
-          
-          COMMIT_MSG="🔄 $SYNC_TYPE: 更新 Meta 规则文件夹
+          COMMIT_MSG="🗑️ 删除 meta 文件夹
 
-          与源仓库 MetaCubeX/meta-rules-dat@meta 分支保持同步。
+          删除不再需要的 meta 文件夹。
 
           详细信息:
-          - 同步时间: $TIMESTAMP
-          - 同步类型: $SYNC_TYPE
-          - 变化文件数: $CHANGED_COUNT
-          - 触发方式: ${{ github.event_name }}
+          - 删除时间: $TIMESTAMP
+          - 操作: 删除整个 meta 目录
 
-          由 GitHub Actions 自动执行"
+          由 GitHub Actions 手动触发执行"
           
           git commit -m "$COMMIT_MSG"
           git push origin main
           
-          echo "✅ 已提交并推送更新"
+          echo "✅ 已提交并推送删除操作"
 
-      - name: Force commit if no changes detected
-        if: steps.check_git.outputs.has_changes == 'false'
+      - name: No changes needed
+        if: steps.check_changes.outputs.has_changes == 'false'
         run: |
-          echo "⚠️  没有检测到文件变化，强制提交以记录同步..."
-          
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SYNC_TYPE="手动同步"
-          else
-            SYNC_TYPE="定时同步"
-          fi
-          
-          COMMIT_MSG="📝 $SYNC_TYPE: 记录同步状态
+          echo "ℹ️  没有变化需要提交（meta 文件夹可能已不存在）"
 
-          同步操作已完成，确保与源仓库完全一致。
-
-          详细信息:
-          - 同步时间: $TIMESTAMP
-          - 同步类型: $SYNC_TYPE
-          - 触发方式: ${{ github.event_name }}
-          - 状态: 已是最新版本
-
-          由 GitHub Actions 自动执行"
-          
-          git commit --allow-empty -m "$COMMIT_MSG"
-          git push origin main
-          
-          echo "✅ 已创建记录性提交"
-
-      - name: Final summary
+      - name: Final verification
         run: |
-          echo "=== 同步任务完成 ==="
-          echo "完成时间: $(date -u '+%Y-%m%d %H:%M:%S UTC')"
+          echo "=== 操作完成 ==="
+          echo "完成时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           
-          if [ "${{ steps.check_git.outputs.has_changes }}" = "true" ]; then
-            echo "✅ 结果: 已同步并提交 ${{ steps.check_git.outputs.changed_count }} 个文件更新"
-          else
-            echo "⚠️  结果: 未检测到文件变化，已创建记录性提交"
-          fi
-          
-          echo ""
-          echo "meta 目录最终状态:"
           if [ -d "meta" ]; then
-            ls -la meta/
-            
-            echo ""
-            echo "目录时间戳:"
-            for dir in meta/*/; do
-              if [ -d "$dir" ]; then
-                dir_name=$(basename "$dir")
-                dir_time=$(stat -c %y "$dir" 2>/dev/null || stat -f %Sm "$dir" 2>/dev/null || echo "unknown")
-                echo "  $dir_name: $dir_time"
-              fi
-            done
+            echo "❌ meta 文件夹仍然存在"
+            exit 1
+          else
+            echo "✅ meta 文件夹已成功删除"
           fi
           
           echo ""
-          echo "任务状态: 完成 ✓"
+          echo "当前目录结构:"
+          ls -la
