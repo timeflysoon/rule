@@ -29,100 +29,65 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Clone source repository
-        id: clone_source
+      - name: Delete meta directory
         run: |
-          SOURCE_DIR="/tmp/meta-source-$(date +%s)"
-          echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
-          
-          echo "📥 克隆源仓库..."
-          git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
-          
-          echo "源仓库内容 (最新状态):"
-          ls -la "$SOURCE_DIR/"
-
-      - name: Force delete and recreate meta directory
-        run: |
-          echo "🗑️  强制删除 meta 目录..."
+          echo "🗑️  删除 meta 目录..."
           rm -rf meta
           
-          echo "📁 重新创建 meta 目录..."
-          mkdir -p meta
+          # 确认删除
+          if [ ! -d "meta" ]; then
+            echo "✅ meta 目录已删除"
+          else
+            echo "❌ meta 目录删除失败"
+          fi
 
-      - name: Copy files and update timestamps
+      - name: Clone source repository directly to meta directory
         run: |
-          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
+          echo "📥 直接克隆源仓库到 meta 目录..."
           
-          echo "📋 复制文件并更新时间戳..."
+          # 直接克隆源仓库到 meta 目录
+          git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git meta
           
-          # 复制所有文件，并更新时间戳为当前时间
-          # 使用 tar 可以保持目录结构并更新时间戳
-          cd "$SOURCE_DIR"
+          echo "克隆完成，清理不需要的文件..."
           
-          # 查找所有文件（不包括 .git 和 .github）
-          find . -type f -name "*" ! -path "./.git/*" ! -path "./.github/*" | while read file; do
-            # 创建目标目录
-            mkdir -p "../work/meta/$(dirname "$file")"
-            # 复制文件并更新时间戳
-            cp -p "$file" "../work/meta/$file"
-          done
+          # 删除源仓库的 .git 目录
+          rm -rf meta/.git
           
-          # 移动回工作目录
-          cd ../work
-          
-          echo "✅ 文件复制完成"
+          echo "✅ 直接克隆完成"
 
-      - name: Verify the copy
+      - name: Verify cloned content
         run: |
-          echo "🔍 验证复制结果..."
+          echo "🔍 验证克隆内容..."
           
           echo "meta 目录内容:"
           ls -la meta/
           
           echo ""
-          echo "各目录的详细内容:"
+          echo "各目录详情:"
           for dir in meta/*/; do
             if [ -d "$dir" ]; then
               dir_name=$(basename "$dir")
               file_count=$(find "$dir" -type f | wc -l)
-              latest_file=$(find "$dir" -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -1)
               echo "  📁 $dir_name: $file_count 个文件"
-              if [ -n "$latest_file" ]; then
-                echo "     最新文件: $latest_file"
-              fi
             fi
           done
 
       - name: Remove any .dat files
         run: |
           echo "🔍 检查 .dat 文件..."
-          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null)
-          if [ -n "$DAT_FILES" ]; then
-            echo "发现 .dat 文件:"
-            echo "$DAT_FILES"
+          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
+          if [ "$DAT_FILES" -gt 0 ]; then
+            echo "发现 $DAT_FILES 个 .dat 文件，正在删除..."
             find meta -name "*.dat" -type f -delete
             echo "✅ 已删除 .dat 文件"
           else
             echo "✓ 没有 .dat 文件"
           fi
 
-      - name: Update all file timestamps to current time
-        run: |
-          echo "🕐 更新所有文件时间戳为当前时间..."
-          
-          # 更新所有文件的时间戳为当前时间
-          find meta -type f -exec touch {} +
-          
-          echo "✅ 时间戳已更新"
-
       - name: Check for git changes
         id: check_git
         run: |
           echo "📊 检查 Git 变化..."
-          
-          # 先查看状态
-          echo "Git 状态:"
-          git status --porcelain || true
           
           # 添加所有变化
           git add -A
@@ -138,7 +103,7 @@ jobs:
             echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
             
             echo "变化文件列表:"
-            git diff --cached --name-only | head -20
+            git diff --cached --name-only | head -10
           fi
 
       - name: Commit and push changes
@@ -165,9 +130,6 @@ jobs:
 
           由 GitHub Actions 自动执行"
           
-          echo "提交信息:"
-          echo "$COMMIT_MSG"
-          
           git commit -m "$COMMIT_MSG"
           git push origin main
           
@@ -186,44 +148,32 @@ jobs:
             SYNC_TYPE="定时同步"
           fi
           
-          COMMIT_MSG="📝 $SYNC_TYPE: 强制更新记录
+          COMMIT_MSG="📝 $SYNC_TYPE: 记录同步状态
 
-          同步操作已完成，但未检测到文件变化。
-          这可能是由于文件内容相同，但时间戳已更新。
+          同步操作已完成，确保与源仓库完全一致。
 
           详细信息:
           - 同步时间: $TIMESTAMP
           - 同步类型: $SYNC_TYPE
           - 触发方式: ${{ github.event_name }}
+          - 状态: 已是最新版本
 
           由 GitHub Actions 自动执行"
           
-          # 添加所有文件
-          git add -A
-          git commit -m "$COMMIT_MSG"
+          git commit --allow-empty -m "$COMMIT_MSG"
           git push origin main
           
-          echo "✅ 已强制提交更新"
-
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "🧹 清理临时文件..."
-          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
-          if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
-            rm -rf "$SOURCE_DIR"
-            echo "✅ 已清理临时目录"
-          fi
+          echo "✅ 已创建记录性提交"
 
       - name: Final summary
         run: |
           echo "=== 同步任务完成 ==="
-          echo "完成时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "完成时间: $(date -u '+%Y-%m%d %H:%M:%S UTC')"
           
           if [ "${{ steps.check_git.outputs.has_changes }}" = "true" ]; then
             echo "✅ 结果: 已同步并提交 ${{ steps.check_git.outputs.changed_count }} 个文件更新"
           else
-            echo "⚠️  结果: 未检测到文件内容变化，已强制提交"
+            echo "⚠️  结果: 未检测到文件变化，已创建记录性提交"
           fi
           
           echo ""
@@ -232,12 +182,12 @@ jobs:
             ls -la meta/
             
             echo ""
-            echo "各目录统计:"
+            echo "目录时间戳:"
             for dir in meta/*/; do
               if [ -d "$dir" ]; then
                 dir_name=$(basename "$dir")
-                file_count=$(find "$dir" -type f | wc -l)
-                echo "  📁 $dir_name: $file_count 个文件"
+                dir_time=$(stat -c %y "$dir" 2>/dev/null || stat -f %Sm "$dir" 2>/dev/null || echo "unknown")
+                echo "  $dir_name: $dir_time"
               fi
             done
           fi
