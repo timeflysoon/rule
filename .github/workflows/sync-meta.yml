@@ -1,18 +1,27 @@
-# 文件名: .github/workflows/delete-meta-folder.yml
-# 删除 meta 文件夹工作流
+# 文件名: .github/workflows/sync-meta-folders.yml
+# 日常使用的同步工作流 - 与源仓库完全一致
 
-name: Delete Meta Folder
+name: Sync Meta Folders Only
 
 on:
-  workflow_dispatch:  # 仅手动触发
+  schedule:
+    - cron: '30 18 * * *'  # UTC 18:30 = 北京时间第二天 2:30
+    - cron: '30 6 * * *'   # UTC 6:30 = 北京时间 14:30
+  workflow_dispatch:
+    inputs:
+      force_sync:
+        description: '强制同步（即使无变化）'
+        required: false
+        default: 'false'
+        type: boolean
 
 permissions:
   contents: write
 
 jobs:
-  delete-meta:
+  sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     
     steps:
       - name: Checkout repository
@@ -26,70 +35,179 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Delete meta folder
+      - name: Create or ensure meta directory
         run: |
-          echo "🗑️  删除 meta 文件夹..."
+          mkdir -p meta
+          echo "确保 meta 目录存在"
+
+      - name: Clone source repository
+        id: clone_source
+        run: |
+          SOURCE_DIR="/tmp/meta-source-$(date +%s)"
+          echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
           
-          if [ -d "meta" ]; then
-            echo "找到 meta 目录，正在删除..."
-            rm -rf meta
-            echo "✅ meta 目录已删除"
+          echo "克隆源仓库 meta 分支..."
+          git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
+          
+          echo "源仓库结构:"
+          ls -la "$SOURCE_DIR/"
+
+      - name: Check for changes (dry-run)
+        id: check_changes
+        if: github.event.inputs.force_sync == 'false'
+        run: |
+          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
+          
+          echo "检查是否有变化（dry-run模式）..."
+          
+          # 使用 rsync 的 dry-run 模式检查变化
+          CHANGES=$(rsync -avn \
+            --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            "$SOURCE_DIR/" "meta/" 2>/dev/null | grep -E "^[^.]" | wc -l)
+          
+          if [ "$CHANGES" -gt 0 ]; then
+            echo "发现 $CHANGES 个变化"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "ℹ️  meta 目录不存在，无需删除"
+            echo "没有变化"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Check if there are changes
-        id: check_changes
+      - name: Sync folders (only if changes or forced)
+        id: sync_folders
+        if: |
+          github.event.inputs.force_sync == 'true' ||
+          steps.check_changes.outputs.has_changes == 'true'
         run: |
-          echo "📊 检查 Git 变化..."
+          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          git add -A
+          echo "同步文件夹..."
+          
+          # 使用 rsync 同步，排除 .git 和 .github 目录
+          # --delete 参数确保删除目标目录中源目录没有的文件
+          rsync -av \
+            --delete \
+            --exclude='.git' \
+            --exclude='.github' \
+            "$SOURCE_DIR/" "meta/"
+          
+          echo "✅ 同步完成"
+          
+          # 显示同步后的结构
+          echo "同步后的 meta 目录结构:"
+          ls -la meta/
+          
+          # 统计文件夹数量
+          FOLDER_COUNT=$(find meta -maxdepth 1 -type d 2>/dev/null | tail -n +2 | wc -l)
+          echo "文件夹数量: $FOLDER_COUNT"
+          echo "folder_count=$FOLDER_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Remove any .dat files (just in case)
+        if: steps.sync_folders.outputs.folder_count
+        run: |
+          echo "确保没有 .dat 文件（与源仓库完全一致）..."
+          
+          # 删除任何 .dat 文件（确保与源仓库完全一致）
+          # 源仓库没有这些文件，所以我们也不应该有
+          if find meta -name "*.dat" -type f 2>/dev/null | grep -q .; then
+            echo "发现 .dat 文件，正在删除..."
+            find meta -name "*.dat" -type f -delete
+            echo "✅ 已删除 .dat 文件"
+          else
+            echo "✓ 没有 .dat 文件（正确）"
+          fi
+
+      - name: Check for git changes
+        id: check_git
+        if: steps.sync_folders.outputs.folder_count
+        run: |
+          echo "检查 Git 变化..."
+          
+          git add meta
           
           if git diff --cached --quiet; then
-            echo "没有检测到变化"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "没有 Git 变化"
+            echo "has_git_changes=false" >> $GITHUB_OUTPUT
           else
-            echo "检测到变化"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
+            echo "有 $CHANGED_COUNT 个文件变化"
+            echo "has_git_changes=true" >> $GITHUB_OUTPUT
+            echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
           fi
 
-      - name: Commit and push if changes
-        if: steps.check_changes.outputs.has_changes == 'true'
+      - name: Commit and push changes
+        if: steps.check_git.outputs.has_git_changes == 'true'
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          CHANGED_COUNT="${{ steps.check_git.outputs.changed_count }}"
           
-          COMMIT_MSG="🗑️ 删除 meta 文件夹
-
-          删除不再需要的 meta 文件夹。
-
+          # 构建中文提交信息，更清晰
+          if [ "${{ github.event.inputs.force_sync }}" = "true" ]; then
+            SYNC_TYPE="强制同步"
+          else
+            SYNC_TYPE="自动同步"
+          fi
+          
+          COMMIT_MSG="🔄 $SYNC_TYPE: 更新 MetaCubeX meta 文件夹
+          
+          保持与源仓库完全一致，同步所有文件夹和文件。
+          
           详细信息:
-          - 删除时间: $TIMESTAMP
-          - 操作: 删除整个 meta 目录
-
-          由 GitHub Actions 手动触发执行"
+          - 源仓库: MetaCubeX/meta-rules-dat@meta
+          - 同步时间: $TIMESTAMP
+          - 同步类型: $SYNC_TYPE
+          - 变化文件数: $CHANGED_COUNT
+          - 文件夹数: ${{ steps.sync_folders.outputs.folder_count }}
+          
+          由 GitHub Actions 自动同步"
           
           git commit -m "$COMMIT_MSG"
           git push origin main
           
-          echo "✅ 已提交并推送删除操作"
+          echo "✅ 已提交并推送更新"
 
       - name: No changes needed
-        if: steps.check_changes.outputs.has_changes == 'false'
+        if: |
+          (github.event.inputs.force_sync == 'false' &&
+           steps.check_changes.outputs.has_changes == 'false') ||
+          (steps.sync_folders.outputs.folder_count && 
+           steps.check_git.outputs.has_git_changes == 'false')
         run: |
-          echo "ℹ️  没有变化需要提交（meta 文件夹可能已不存在）"
+          echo "🎉 已是最新版本，无需更新"
+          echo "当前 meta 目录结构:"
+          ls -la meta/
+          echo ""
+          echo "与源仓库完全一致 ✓"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "清理临时目录..."
+          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
+          if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
+            rm -rf "$SOURCE_DIR"
+            echo "✅ 已清理临时目录"
+          fi
 
       - name: Final verification
         run: |
-          echo "=== 操作完成 ==="
-          echo "完成时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "=== 最终验证 ==="
+          echo "同步完成时间: $(date)"
+          echo "同步结果: ${{ steps.check_git.outputs.has_git_changes == 'true' && '已更新' || '无变化' }}"
           
           if [ -d "meta" ]; then
-            echo "❌ meta 文件夹仍然存在"
-            exit 1
+            echo "meta 目录内容:"
+            ls -la meta/
+            
+            # 检查是否有 .dat 文件
+            DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
+            if [ "$DAT_FILES" -eq 0 ]; then
+              echo "✅ 验证通过: 没有 .dat 文件（与源仓库一致）"
+            else
+              echo "⚠️  警告: 发现 $DAT_FILES 个 .dat 文件"
+            fi
           else
-            echo "✅ meta 文件夹已成功删除"
+            echo "❌ 错误: meta 目录不存在"
           fi
-          
-          echo ""
-          echo "当前目录结构:"
-          ls -la
