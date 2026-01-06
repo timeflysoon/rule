@@ -7,7 +7,7 @@ on:
   schedule:
     - cron: '30 18 * * *'  # UTC 18:30 = 北京时间第二天 2:30
     - cron: '30 6 * * *'   # UTC 6:30 = 北京时间 14:30
-  workflow_dispatch:     # 无强制选项，每次都完整镜像同步
+  workflow_dispatch:     # 无强制选项，每次都强制全新镜像同步
 
 permissions:
   contents: write
@@ -29,19 +29,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Delete old meta folder (with tolerance)
+      - name: Delete old meta folder (tolerant)
         run: |
-          echo "🗑️ 开始删除旧的 meta 文件夹（容错处理）..."
-          
+          echo "🗑️ 强制删除旧 meta 文件夹（容错）..."
           if [ -d "meta" ]; then
-            echo "找到 meta 目录，正在强制删除..."
+            echo "发现旧 meta，正在删除（包括所有多余文件）..."
             rm -rf meta
-            echo "✅ meta 目录已成功删除"
+            echo "✅ 旧 meta 已完全删除"
           else
-            echo "ℹ️ meta 目录不存在，无需删除"
+            echo "ℹ️ meta 不存在，无需删除"
           fi
           
-          echo "删除后工作区确认:"
+          echo "删除后确认:"
           ls -la | grep meta || echo "meta 已不存在"
 
       - name: Clone source repository
@@ -50,115 +49,80 @@ jobs:
           SOURCE_DIR="/tmp/meta-source-$(date +%s)"
           echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
           
-          echo "正在克隆源仓库 meta 分支..."
+          echo "克隆源仓库 meta 分支（仅三个文件夹）..."
           git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
           
-          echo "=== 源仓库根目录内容 ==="
+          echo "源仓库内容:"
           ls -la "$SOURCE_DIR/"
-          echo "=== 源仓库子文件夹列表 ==="
-          find "$SOURCE_DIR" -mindepth 1 -type d | sort
 
-      - name: Force create and mirror sync new meta folder
+      - name: Create and full mirror sync new meta
         run: |
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
           echo "=== 开始全新镜像同步 ==="
-          echo "创建新的 meta 文件夹..."
           mkdir meta
           
-          echo "使用 rsync 强制镜像复制所有内容（带 --delete，确保精确一致）..."
-          rsync -av --delete \
-            --exclude='.git' \
-            "$SOURCE_DIR/" "meta/"
+          echo "使用 rsync 强制镜像（--delete 会删除多余文件，确保完全一致）..."
+          rsync -av --delete --exclude='.git' "$SOURCE_DIR/" "meta/"
           
-          echo "✅ 新 meta 文件夹镜像同步完成"
-          
-          echo "=== 同步后 meta 根目录内容 ==="
+          echo "✅ 新 meta 已镜像完成（仅 asn、geo-lite、geo）"
           ls -la meta/
-          echo "=== 同步后 meta 子文件夹列表 ==="
-          find meta -mindepth 1 -type d | sort
 
-      - name: Remove any residual .dat files
+      - name: Clean any .dat files
         run: |
-          echo "额外清理可能的 .dat 文件..."
-          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
-          if [ "$DAT_FILES" -gt 0 ]; then
-            echo "发现 $DAT_FILES 个 .dat 文件，正在删除..."
+          echo "额外清理 .dat 文件..."
+          if find meta -name "*.dat" -type f 2>/dev/null | grep -q .; then
             find meta -name "*.dat" -type f -delete
-            echo "✅ 已清理 .dat 文件"
+            echo "✅ 已删除 .dat 文件"
           else
-            echo "✓ 无 .dat 文件（正常）"
+            echo "✓ 无 .dat 文件"
           fi
 
-      - name: Check for git changes
-        id: check_git
+      - name: Commit and push (always, safe even if no changes)
         run: |
-          echo "检查 Git 变化..."
+          echo "添加变化并提交推送..."
           git add meta
           
-          if git diff --cached --quiet; then
-            echo "没有变化（已与源仓库完全一致）"
-            echo "has_git_changes=false" >> $GITHUB_OUTPUT
-          else
-            CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
-            echo "检测到 $CHANGED_COUNT 个文件变化（包括多余文件删除和新文件同步）"
-            echo "has_git_changes=true" >> $GITHUB_OUTPUT
-            echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
-
-      - name: Commit and push changes
-        if: steps.check_git.outputs.has_git_changes == 'true'
-        run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          CHANGED_COUNT="${{ steps.check_git.outputs.changed_count }}"
           
           COMMIT_MSG="🔄 自动同步: 更新 MetaCubeX meta 文件夹
           
-          强制删除旧 meta 并全新镜像同步，确保与源仓库完全一致（仅保留 asn、geo-lite、geo 三个文件夹）。
+          强制删除旧 meta 并全新镜像同步，确保与源仓库完全一致（仅保留 asn、geo-lite、geo）。
+          多余文件（如 list、mrs、json 等）已被自动删除。
           
           详细信息:
           - 源仓库: MetaCubeX/meta-rules-dat@meta
           - 同步时间: $TIMESTAMP
-          - 变化文件数: $CHANGED_COUNT（包含多余文件删除）
           
-          由 GitHub Actions 自动镜像同步"
+          由 GitHub Actions 自动执行"
           
-          git commit -m "$COMMIT_MSG"
-          git push origin main
+          git commit -m "$COMMIT_MSG" || echo "无变化，无需 commit"
+          git push origin main || echo "推送完成（或无变化）"
           
-          echo "✅ 已提交并推送更新"
+          echo "✅ 操作完成"
 
-      - name: No changes needed
-        if: steps.check_git.outputs.has_git_changes == 'false'
-        run: |
-          echo "🎉 已是最新版本，无需更新"
-          echo "当前 meta 结构（仅三个文件夹）:"
-          ls -la meta/
-          echo "与源仓库完全一致 ✓"
-
-      - name: Cleanup
+      - name: Cleanup temporary dir
         if: always()
         run: |
-          echo "清理临时目录..."
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
             rm -rf "$SOURCE_DIR"
-            echo "✅ 已清理临时目录"
           fi
 
       - name: Final verification
         run: |
           echo "=== 最终验证 ==="
-          echo "同步完成时间: $(date)"
+          echo "完成时间: $(date)"
           
           if [ -d "meta" ]; then
-            echo "meta 根目录内容（应仅三个文件夹）:"
+            echo "meta 当前内容（应仅三个文件夹）:"
             ls -la meta/
-            
-            if [ "$(ls -A meta | wc -l)" -eq 3 ]; then
-              echo "✅ 验证通过: 仅 asn、geo-lite、geo 三个文件夹，与源仓库一致"
+            ITEM_COUNT=$(ls -1 meta | wc -l)
+            if [ "$ITEM_COUNT" -eq 3 ]; then
+              echo "✅ 验证成功: 仅三个文件夹，与源仓库完全一致"
             else
-              echo "⚠️  警告: meta 内文件/文件夹数量异常"
+              echo "⚠️  警告: meta 内项目数 $ITEM_COUNT（异常）"
             fi
           else
-            echo "❌ 错误: meta 目录未创建（严重问题）"
+            echo "❌ 错误: meta 未创建"
           fi
