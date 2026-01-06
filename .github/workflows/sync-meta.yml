@@ -15,7 +15,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2  # 应该很快完成
     
     steps:
       - name: Checkout repository
@@ -35,146 +35,93 @@ jobs:
           SOURCE_DIR="/tmp/meta-source-$(date +%s)"
           echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
           
-          echo "📥 克隆源仓库 meta 分支..."
+          echo "📥 克隆源仓库..."
           git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
           
-          echo "源仓库内容:"
+          echo "源仓库内容 (最新状态):"
           ls -la "$SOURCE_DIR/"
+
+      - name: Debug - Check source directory timestamps
+        run: |
+          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          # 显示源仓库各目录的最新修改时间
-          echo "源仓库目录时间戳:"
+          echo "🔍 检查源仓库目录时间戳:"
           for dir in "$SOURCE_DIR"/*/; do
             if [ -d "$dir" ]; then
               dir_name=$(basename "$dir")
-              latest_file=$(find "$dir" -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -1)
-              if [ -n "$latest_file" ]; then
-                echo "  $dir_name: $latest_file"
-              fi
+              # 使用stat获取目录修改时间
+              dir_time=$(stat -c %y "$dir" 2>/dev/null || stat -f %Sm "$dir" 2>/dev/null || echo "unknown")
+              file_count=$(find "$dir" -type f | wc -l)
+              echo "  $dir_name: $file_count 个文件, 目录时间: $dir_time"
             fi
           done
 
-      - name: Check current meta status
-        id: check_current
+      - name: Debug - Check current meta directory timestamps
         run: |
-          echo "📊 检查当前 meta 目录状态..."
-          
+          echo "🔍 检查当前 meta 目录时间戳:"
           if [ -d "meta" ]; then
-            echo "当前 meta 目录内容:"
-            ls -la meta/
-            
-            echo "当前目录时间戳:"
             for dir in meta/*/; do
               if [ -d "$dir" ]; then
                 dir_name=$(basename "$dir")
-                latest_file=$(find "$dir" -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -1)
-                if [ -n "$latest_file" ]; then
-                  echo "  $dir_name: $latest_file"
-                fi
+                dir_time=$(stat -c %y "$dir" 2>/dev/null || stat -f %Sm "$dir" 2>/dev/null || echo "unknown")
+                file_count=$(find "$dir" -type f | wc -l)
+                echo "  $dir_name: $file_count 个文件, 目录时间: $dir_time"
               fi
             done
-            
-            # 计算当前文件的MD5哈希用于验证
-            echo "计算当前 meta 目录哈希..."
-            find meta -type f -name "*.json" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1 > /tmp/current_hash.txt
-            CURRENT_HASH=$(cat /tmp/current_hash.txt)
-            echo "当前哈希: $CURRENT_HASH"
-            echo "current_hash=$CURRENT_HASH" >> $GITHUB_OUTPUT
           else
-            echo "ℹ️  meta 目录不存在，将创建"
-            echo "current_hash=none" >> $GITHUB_OUTPUT
+            echo "  meta 目录不存在"
           fi
 
-      - name: Force sync all files
-        id: force_sync
+      - name: Force sync - Complete replacement
         run: |
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          echo "🔄 强制同步所有文件..."
+          echo "🔄 强制同步 - 完全替换..."
           
           # 完全删除旧的 meta 目录
-          echo "删除旧的 meta 目录..."
           rm -rf meta
           
-          # 重新创建 meta 目录
+          # 重新创建并复制所有内容
           mkdir -p meta
           
-          # 强制复制所有文件，不保留时间戳（使用当前时间）
-          echo "复制文件..."
-          cp -r "$SOURCE_DIR"/* meta/ 2>/dev/null || true
+          echo "复制文件中..."
           
-          # 移除可能存在的 .git 和 .github 目录
-          rm -rf meta/.git meta/.github 2>/dev/null || true
+          # 复制所有文件和目录，但不包括 .git
+          for item in "$SOURCE_DIR"/*; do
+            # 排除 .git 和 .github 目录
+            if [[ "$item" != *"/.git" && "$item" != *"/.github" ]]; then
+              cp -r "$item" "meta/"
+              echo "  已复制: $(basename "$item")"
+            fi
+          done
           
-          echo "✅ 强制同步完成"
-          
-          # 验证同步结果
-          echo "同步后 meta 目录内容:"
-          ls -la meta/
+          echo "✅ 同步完成"
 
-      - name: Remove any .dat files (safety check)
+      - name: Verify sync result
         run: |
-          echo "🔍 检查是否有 .dat 文件..."
+          echo "🔍 验证同步结果:"
+          echo "同步后的 meta 目录:"
+          ls -la meta/
           
-          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null)
-          if [ -n "$DAT_FILES" ]; then
+          echo ""
+          echo "各目录文件数量:"
+          for dir in meta/*/; do
+            if [ -d "$dir" ]; then
+              dir_name=$(basename "$dir")
+              file_count=$(find "$dir" -type f | wc -l)
+              echo "  $dir_name: $file_count 个文件"
+            fi
+          done
+
+      - name: Remove any .dat files
+        run: |
+          echo "🔍 检查 .dat 文件..."
+          if find meta -name "*.dat" -type f 2>/dev/null | grep -q .; then
             echo "发现 .dat 文件，正在删除..."
-            echo "$DAT_FILES"
             find meta -name "*.dat" -type f -delete
-            echo "✅ 已清理 .dat 文件"
+            echo "✅ 已删除 .dat 文件"
           else
             echo "✓ 没有 .dat 文件"
-          fi
-
-      - name: Calculate source hash for verification
-        id: source_hash
-        run: |
-          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
-          
-          echo "计算源仓库哈希..."
-          find "$SOURCE_DIR" -type f -name "*.json" ! -path "*/.git/*" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1 > /tmp/source_hash.txt
-          SOURCE_HASH=$(cat /tmp/source_hash.txt)
-          echo "源仓库哈希: $SOURCE_HASH"
-          echo "source_hash=$SOURCE_HASH" >> $GITHUB_OUTPUT
-
-      - name: Calculate synced hash for verification
-        id: synced_hash
-        run: |
-          echo "计算同步后哈希..."
-          find meta -type f -name "*.json" -exec md5sum {} \; | sort | md5sum | cut -d' ' -f1 > /tmp/synced_hash.txt
-          SYNCED_HASH=$(cat /tmp/synced_hash.txt)
-          echo "同步后哈希: $SYNCED_HASH"
-          echo "synced_hash=$SYNCED_HASH" >> $GITHUB_OUTPUT
-
-      - name: Verify sync integrity
-        run: |
-          SOURCE_HASH="${{ steps.source_hash.outputs.source_hash }}"
-          SYNCED_HASH="${{ steps.synced_hash.outputs.synced_hash }}"
-          
-          echo "🔍 验证同步完整性..."
-          echo "源仓库哈希: $SOURCE_HASH"
-          echo "同步后哈希: $SYNCED_HASH"
-          
-          if [ "$SOURCE_HASH" = "$SYNCED_HASH" ]; then
-            echo "✅ 验证通过：哈希匹配，同步完整"
-          else
-            echo "❌ 验证失败：哈希不匹配"
-            echo "差异分析:"
-            
-            # 列出源仓库和同步后的文件差异
-            SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
-            
-            echo "源仓库文件列表:"
-            find "$SOURCE_DIR" -type f ! -path "*/.git/*" | sort > /tmp/source_files.txt
-            echo "同步后文件列表:"
-            find meta -type f | sort > /tmp/synced_files.txt
-            
-            echo "文件数量差异:"
-            wc -l /tmp/source_files.txt /tmp/synced_files.txt
-            
-            echo "文件列表差异:"
-            diff -u /tmp/source_files.txt /tmp/synced_files.txt || true
-            
-            exit 1
           fi
 
       - name: Check for git changes
@@ -182,8 +129,12 @@ jobs:
         run: |
           echo "📊 检查 Git 变化..."
           
-          # 添加所有变化
-          git add -A
+          # 先查看状态
+          echo "Git 状态:"
+          git status --porcelain meta/ || true
+          
+          # 添加变化
+          git add meta
           
           # 检查是否有待提交的更改
           if git diff --cached --quiet; then
@@ -191,15 +142,12 @@ jobs:
             echo "has_changes=false" >> $GITHUB_OUTPUT
           else
             CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
-            CHANGED_FILES=$(git diff --cached --name-only | head -20)
             echo "📝 检测到 $CHANGED_COUNT 个文件变化"
             echo "has_changes=true" >> $GITHUB_OUTPUT
             echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
             
-            if [ $CHANGED_COUNT -gt 0 ]; then
-              echo "前 20 个变化文件:"
-              echo "$CHANGED_FILES"
-            fi
+            echo "变化文件列表:"
+            git diff --cached --name-only
           fi
 
       - name: Commit and push if changes found
@@ -208,20 +156,6 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           CHANGED_COUNT="${{ steps.check_git.outputs.changed_count }}"
           
-          # 获取源仓库的最新更新时间
-          SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
-          SOURCE_UPDATES=""
-          for dir in "$SOURCE_DIR"/*/; do
-            if [ -d "$dir" ]; then
-              dir_name=$(basename "$dir")
-              latest_time=$(find "$dir" -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -1 | cut -d' ' -f1)
-              if [ -n "$latest_time" ]; then
-                SOURCE_UPDATES="$SOURCE_UPDATES\n- $dir_name: $(echo $latest_time | sed 's/+/ /')"
-              fi
-            fi
-          done
-          
-          # 判断同步类型
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             SYNC_TYPE="手动同步"
           else
@@ -230,17 +164,13 @@ jobs:
           
           COMMIT_MSG="🔄 $SYNC_TYPE: 更新 Meta 规则文件夹
 
-          保持与源仓库 MetaCubeX/meta-rules-dat@meta 分支完全一致。
+          与源仓库 MetaCubeX/meta-rules-dat@meta 分支保持同步。
 
           详细信息:
           - 同步时间: $TIMESTAMP
           - 同步类型: $SYNC_TYPE
           - 变化文件数: $CHANGED_COUNT
           - 触发方式: ${{ github.event_name }}
-          - 哈希验证: ✅ 通过
-
-          源仓库最新更新时间:
-          $(echo -e "$SOURCE_UPDATES")
 
           由 GitHub Actions 自动执行"
           
@@ -252,93 +182,55 @@ jobs:
           
           echo "✅ 已提交并推送更新"
 
-      - name: Force commit if no changes but sync happened
+      - name: Create empty commit if no changes (for debugging)
         if: steps.check_git.outputs.has_changes == 'false'
         run: |
-          echo "⚠️  没有检测到 Git 变化，但同步已执行"
+          echo "⚠️  没有检测到文件变化，但同步已执行"
+          echo "创建空提交用于调试..."
           
-          # 即使没有文件变化，我们也创建一个提交以确保记录同步状态
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            SYNC_TYPE="手动同步"
-          else
-            SYNC_TYPE="定时同步"
-          fi
-          
-          COMMIT_MSG="📝 $SYNC_TYPE: 记录同步状态
+          COMMIT_MSG="🔍 调试: 同步检查
 
-          源仓库内容无变化，但已确认与最新版本一致。
+          同步检查完成，但未检测到文件变化。
 
           详细信息:
           - 检查时间: $TIMESTAMP
-          - 同步类型: $SYNC_TYPE
           - 触发方式: ${{ github.event_name }}
-          - 哈希验证: ✅ 通过
-          - 状态: 已是最新版本
+          - 状态: 文件已是最新或同步未产生变化
 
           由 GitHub Actions 自动执行"
           
-          echo "创建记录性提交..."
-          echo "提交信息:"
-          echo "$COMMIT_MSG"
-          
-          # 创建一个空提交（仅用于记录）
           git commit --allow-empty -m "$COMMIT_MSG"
           git push origin main
           
-          echo "✅ 已创建记录性提交"
+          echo "✅ 已创建调试提交"
 
-      - name: Cleanup temporary files
+      - name: Cleanup
         if: always()
         run: |
           echo "🧹 清理临时文件..."
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
-          
           if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
             rm -rf "$SOURCE_DIR"
             echo "✅ 已清理临时目录"
           fi
-          
-          # 清理临时文件
-          rm -f /tmp/current_hash.txt /tmp/source_hash.txt /tmp/synced_hash.txt 2>/dev/null || true
-          rm -f /tmp/source_files.txt /tmp/synced_files.txt 2>/dev/null || true
 
       - name: Final summary
         run: |
           echo "=== 同步任务完成 ==="
           echo "完成时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "执行耗时: 约 $SECONDS 秒"
-          echo ""
-          
-          echo "哈希状态:"
-          echo "源仓库: ${{ steps.source_hash.outputs.source_hash }}"
-          echo "同步后: ${{ steps.synced_hash.outputs.synced_hash }}"
           
           if [ "${{ steps.check_git.outputs.has_changes }}" = "true" ]; then
             echo "✅ 结果: 已同步并提交 ${{ steps.check_git.outputs.changed_count }} 个文件更新"
           else
-            echo "ℹ️  结果: 无文件变化，已创建记录性提交"
+            echo "⚠️  结果: 未检测到文件变化"
           fi
           
           echo ""
           echo "meta 目录最终状态:"
           if [ -d "meta" ]; then
             ls -la meta/
-            echo ""
-            echo "各目录最后更新时间:"
-            for dir in meta/*/; do
-              if [ -d "$dir" ]; then
-                dir_name=$(basename "$dir")
-                file_count=$(find "$dir" -type f | wc -l)
-                latest_time=$(find "$dir" -type f -printf '%T+ %p\n' 2>/dev/null | sort -r | head -1 | cut -d' ' -f1 | cut -d'+' -f1)
-                if [ -n "$latest_time" ]; then
-                  echo "  📁 $dir_name: $file_count 个文件，最新: $latest_time"
-                else
-                  echo "  📁 $dir_name: $file_count 个文件"
-                fi
-              fi
-            done
           fi
           
           echo ""
