@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1
+          fetch-depth: 0  # 获取完整历史以便比较
 
       - name: Setup Git
         run: |
@@ -52,30 +52,47 @@ jobs:
           echo "源仓库结构:"
           ls -la "$SOURCE_DIR/"
 
-      - name: Check for changes (dry-run)
+      - name: Check for changes
         id: check_changes
         if: github.event.inputs.force_sync == 'false'
         run: |
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          echo "检查是否有变化（dry-run模式）..."
+          echo "检查本地 meta 目录与源仓库的差异..."
           
-          # 使用 rsync 的 dry-run 模式检查变化
-          CHANGES=$(rsync -avn \
-            --delete \
-            --exclude='.git' \
-            --exclude='.github' \
-            "$SOURCE_DIR/" "meta/" 2>/dev/null | grep -E "^[^.]" | wc -l)
+          # 使用 git diff 比较当前仓库的 meta 目录和源仓库的差异
+          # 先将源仓库内容复制到临时目录进行比较
+          TEMP_COMPARE="/tmp/compare-$(date +%s)"
+          cp -r "$SOURCE_DIR" "$TEMP_COMPARE"
           
-          if [ "$CHANGES" -gt 0 ]; then
-            echo "发现 $CHANGES 个变化"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+          # 计算源仓库的哈希
+          find "$TEMP_COMPARE" -type f -exec sha256sum {} \; | sort > /tmp/source_hashes.txt
+          
+          # 计算当前 meta 目录的哈希
+          if [ -d "meta" ] && [ "$(ls -A meta 2>/dev/null)" ]; then
+            find meta -type f -exec sha256sum {} \; | sort > /tmp/target_hashes.txt
+            
+            # 比较哈希值
+            if diff -q /tmp/source_hashes.txt /tmp/target_hashes.txt > /dev/null 2>&1; then
+              echo "没有变化"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            else
+              echo "发现变化"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+              
+              # 显示具体差异
+              echo "具体差异:"
+              diff -u /tmp/source_hashes.txt /tmp/target_hashes.txt || true
+            fi
           else
-            echo "没有变化"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "meta 目录为空，需要同步"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
           fi
+          
+          # 清理临时文件
+          rm -rf "$TEMP_COMPARE"
 
-      - name: Sync folders (only if changes or forced)
+      - name: Sync folders
         id: sync_folders
         if: |
           github.event.inputs.force_sync == 'true' ||
@@ -83,7 +100,16 @@ jobs:
         run: |
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          echo "同步文件夹..."
+          echo "开始同步文件夹..."
+          
+          # 备份当前 meta 目录内容以便后续比较
+          if [ -d "meta" ]; then
+            mkdir -p /tmp/meta_backup
+            cp -r meta/* /tmp/meta_backup/ 2>/dev/null || true
+          fi
+          
+          # 清空 meta 目录（保留目录本身）
+          rm -rf meta/*
           
           # 使用 rsync 同步，排除 .git 和 .github 目录
           # --delete 参数确保删除目标目录中源目录没有的文件
@@ -103,6 +129,11 @@ jobs:
           FOLDER_COUNT=$(find meta -maxdepth 1 -type d 2>/dev/null | tail -n +2 | wc -l)
           echo "文件夹数量: $FOLDER_COUNT"
           echo "folder_count=$FOLDER_COUNT" >> $GITHUB_OUTPUT
+          
+          # 统计文件数量
+          FILE_COUNT=$(find meta -type f 2>/dev/null | wc -l)
+          echo "文件数量: $FILE_COUNT"
+          echo "file_count=$FILE_COUNT" >> $GITHUB_OUTPUT
 
       - name: Remove any .dat files (just in case)
         if: steps.sync_folders.outputs.folder_count
@@ -123,18 +154,26 @@ jobs:
         id: check_git
         if: steps.sync_folders.outputs.folder_count
         run: |
-          echo "检查 Git 变化..."
+          echo "检查 Git 状态变化..."
           
-          git add meta
+          # 添加所有变化
+          git add -A
           
+          # 检查是否有待提交的更改
           if git diff --cached --quiet; then
             echo "没有 Git 变化"
             echo "has_git_changes=false" >> $GITHUB_OUTPUT
           else
             CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
+            CHANGED_FILES=$(git diff --cached --name-only | head -10)
             echo "有 $CHANGED_COUNT 个文件变化"
             echo "has_git_changes=true" >> $GITHUB_OUTPUT
             echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
+            
+            if [ $CHANGED_COUNT -gt 0 ]; then
+              echo "前 10 个变化的文件:"
+              echo "$CHANGED_FILES"
+            fi
           fi
 
       - name: Commit and push changes
@@ -143,43 +182,49 @@ jobs:
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           CHANGED_COUNT="${{ steps.check_git.outputs.changed_count }}"
           
-          # 构建中文提交信息，更清晰
+          # 构建中文提交信息
           if [ "${{ github.event.inputs.force_sync }}" = "true" ]; then
             SYNC_TYPE="强制同步"
+            SYNC_REASON="（手动触发强制同步）"
           else
             SYNC_TYPE="自动同步"
+            SYNC_REASON=""
           fi
           
-          COMMIT_MSG="🔄 $SYNC_TYPE: 更新 MetaCubeX meta 文件夹
+          COMMIT_MSG="🔄 $SYNC_TYPE: 更新 MetaCubeX meta 文件夹$SYNC_REASON
           
           保持与源仓库完全一致，同步所有文件夹和文件。
           
           详细信息:
-          - 源仓库: MetaCubeX/meta-rules-dat@meta
+          - 源仓库: MetaCubeX/meta-rules-dat@meta 分支
           - 同步时间: $TIMESTAMP
           - 同步类型: $SYNC_TYPE
           - 变化文件数: $CHANGED_COUNT
           - 文件夹数: ${{ steps.sync_folders.outputs.folder_count }}
+          - 文件总数: ${{ steps.sync_folders.outputs.file_count }}
           
-          由 GitHub Actions 自动同步"
+          此提交由 GitHub Actions 工作流自动创建。"
           
           git commit -m "$COMMIT_MSG"
           git push origin main
           
           echo "✅ 已提交并推送更新"
+          echo "提交信息:"
+          echo "$COMMIT_MSG"
 
       - name: No changes needed
         if: |
           (github.event.inputs.force_sync == 'false' &&
-           steps.check_changes.outputs.has_changes == 'false') ||
-          (steps.sync_folders.outputs.folder_count && 
-           steps.check_git.outputs.has_git_changes == 'false')
+           steps.check_changes.outputs.has_changes == 'false')
         run: |
           echo "🎉 已是最新版本，无需更新"
-          echo "当前 meta 目录结构:"
-          ls -la meta/
+          echo ""
+          echo "当前 meta 目录状态:"
+          echo "文件夹数: ${{ steps.sync_folders.outputs.folder_count || '未知' }}"
+          echo "文件数: ${{ steps.sync_folders.outputs.file_count || '未知' }}"
           echo ""
           echo "与源仓库完全一致 ✓"
+          echo "下次自动检查时间: UTC 6:30 和 18:30"
 
       - name: Cleanup
         if: always()
@@ -188,17 +233,30 @@ jobs:
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           if [ -n "$SOURCE_DIR" ] && [ -d "$SOURCE_DIR" ]; then
             rm -rf "$SOURCE_DIR"
-            echo "✅ 已清理临时目录"
+            echo "✅ 已清理源仓库临时目录"
           fi
+          
+          # 清理其他临时文件
+          rm -f /tmp/source_hashes.txt /tmp/target_hashes.txt 2>/dev/null || true
+          rm -rf /tmp/meta_backup 2>/dev/null || true
+          rm -rf /tmp/compare-* 2>/dev/null || true
 
       - name: Final verification
         run: |
           echo "=== 最终验证 ==="
-          echo "同步完成时间: $(date)"
-          echo "同步结果: ${{ steps.check_git.outputs.has_git_changes == 'true' && '已更新' || '无变化' }}"
+          echo "同步完成时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "工作流触发方式: ${{ github.event_name }}"
+          
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "手动触发参数:"
+            echo "  - 强制同步: ${{ github.event.inputs.force_sync }}"
+          fi
+          
+          echo "同步结果: ${{ steps.check_git.outputs.has_git_changes == 'true' && '✅ 已更新并推送' || 'ℹ️  无变化，无需更新' }}"
           
           if [ -d "meta" ]; then
-            echo "meta 目录内容:"
+            echo ""
+            echo "meta 目录验证:"
             ls -la meta/
             
             # 检查是否有 .dat 文件
@@ -208,6 +266,15 @@ jobs:
             else
               echo "⚠️  警告: 发现 $DAT_FILES 个 .dat 文件"
             fi
+            
+            # 显示文件夹和文件统计
+            FOLDER_COUNT=$(find meta -maxdepth 1 -type d 2>/dev/null | tail -n +2 | wc -l)
+            FILE_COUNT=$(find meta -type f 2>/dev/null | wc -l)
+            echo "📁 文件夹数: $FOLDER_COUNT"
+            echo "📄 文件总数: $FILE_COUNT"
           else
             echo "❌ 错误: meta 目录不存在"
           fi
+          
+          echo ""
+          echo "=== 工作流执行完成 ==="
