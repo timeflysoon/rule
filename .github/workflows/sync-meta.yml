@@ -38,10 +38,10 @@ jobs:
           echo "正在克隆源仓库 meta 分支..."
           git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
           
-          echo "源仓库根目录结构:"
+          echo "=== 源仓库根目录内容 ==="
           ls -la "$SOURCE_DIR/"
-          echo "源仓库完整结构（递归）:"
-          find "$SOURCE_DIR" -type d | sort
+          echo "=== 源仓库子文件夹列表 ==="
+          find "$SOURCE_DIR" -mindepth 1 -type d | sort
 
       - name: Force mirror sync meta folder
         id: sync_folders
@@ -49,51 +49,51 @@ jobs:
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
           echo "=== 开始强制镜像同步 ==="
-          echo "删除旧的 meta 文件夹（确保彻底干净）..."
+          echo "删除旧的 meta 文件夹（彻底清理）..."
           rm -rf meta
-          echo "旧 meta 已删除，当前工作区 meta 状态:"
-          ls -la | grep meta || echo "meta 已不存在"
+          echo "旧 meta 已删除，确认工作区状态:"
+          ls -la | grep meta || echo "meta 目录已不存在"
           
-          echo "创建新 meta 文件夹并完整复制源仓库内容..."
+          echo "创建新 meta 文件夹并完整复制源仓库所有内容（包括隐藏文件）..."
           mkdir meta
-          cp -r "$SOURCE_DIR"/* meta/
+          cp -r "$SOURCE_DIR"/* "$SOURCE_DIR"/.* meta/ || true  # || true 防止隐藏文件报错
           
-          echo "✅ 镜像同步完成（使用 cp -r 强制完整复制）"
+          echo "✅ 镜像同步完成"
           
-          echo "同步后的 meta 根目录结构:"
+          echo "=== 同步后 meta 根目录内容 ==="
           ls -la meta/
-          echo "同步后的 meta 完整结构（递归）:"
-          find meta -type d | sort
+          echo "=== 同步后 meta 子文件夹列表 ==="
+          find meta -mindepth 1 -type d | sort
           
-          # 统计子文件夹数量（仅用于日志和提交信息）
+          # 统计子文件夹数量
           FOLDER_COUNT=$(find meta -mindepth 1 -type d | wc -l)
           echo "子文件夹数量: $FOLDER_COUNT"
           echo "folder_count=$FOLDER_COUNT" >> $GITHUB_OUTPUT
 
       - name: Remove any .dat files (just in case)
         run: |
-          echo "确保没有残留的 .dat 文件（与源仓库保持一致）..."
+          echo "检查并删除可能的 .dat 文件..."
           DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
           if [ "$DAT_FILES" -gt 0 ]; then
             echo "发现 $DAT_FILES 个 .dat 文件，正在删除..."
             find meta -name "*.dat" -type f -delete
             echo "✅ 已删除所有 .dat 文件"
           else
-            echo "✓ 未发现 .dat 文件（正确）"
+            echo "✓ 未发现 .dat 文件（正常）"
           fi
 
       - name: Check for git changes
         id: check_git
         run: |
-          echo "检查 Git 是否有变化..."
+          echo "检查 Git 变化..."
           git add meta
           
           if git diff --cached --quiet; then
-            echo "没有 Git 变化（已与源仓库完全一致）"
+            echo "没有变化（已与源仓库完全一致）"
             echo "has_git_changes=false" >> $GITHUB_OUTPUT
           else
             CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
-            echo "检测到 $CHANGED_COUNT 个文件变化，将提交推送"
+            echo "检测到 $CHANGED_COUNT 个文件变化，将提交"
             echo "has_git_changes=true" >> $GITHUB_OUTPUT
             echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
           fi
@@ -106,7 +106,7 @@ jobs:
           
           COMMIT_MSG="🔄 自动同步: 更新 MetaCubeX meta 文件夹
           
-          通过强制完整镜像同步，保持与源仓库完全一致（包括删除多余文件）。
+          强制完整镜像同步，确保与源仓库完全一致（包括所有子文件夹及文件更新/删除）。
           
           详细信息:
           - 源仓库: MetaCubeX/meta-rules-dat@meta
@@ -125,8 +125,8 @@ jobs:
         if: steps.check_git.outputs.has_git_changes == 'false'
         run: |
           echo "🎉 已是最新版本，无需更新"
-          echo "当前 meta 完整结构:"
-          find meta -type d | sort
+          echo "当前 meta 子文件夹列表:"
+          find meta -mindepth 1 -type d | sort
           echo ""
           echo "与源仓库完全一致 ✓"
 
@@ -149,13 +149,15 @@ jobs:
           if [ -d "meta" ]; then
             echo "meta 根目录内容:"
             ls -la meta/
+            echo "meta 完整子文件夹树:"
+            find meta -type d | sort
             
             DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
             if [ "$DAT_FILES" -eq 0 ]; then
-              echo "✅ 验证通过: 没有 .dat 文件（与源仓库一致）"
+              echo "✅ 验证通过: 无 .dat 文件"
             else
-              echo "⚠️  警告: 仍发现 $DAT_FILES 个 .dat 文件"
+              echo "⚠️  警告: 发现 $DAT_FILES 个 .dat 文件"
             fi
           else
-            echo "❌ 错误: meta 目录不存在（严重问题）"
+            echo "❌ 错误: meta 目录不存在"
           fi
