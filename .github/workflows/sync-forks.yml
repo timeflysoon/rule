@@ -3,8 +3,10 @@ name: Update All Fork Repositories
 on:
   schedule:
     # 每天北京时间 03:00 和 15:00 自动运行，同步所有fork仓库
-    - cron: '0 19 * * *'  # UTC 19:00 = 北京时间次日 03:00
-    - cron: '0 7 * * *'   # UTC 07:00 = 北京时间当天 15:00
+    - cron: '0 3 * * *'
+      timezone: Asia/Shanghai
+    - cron: '0 15 * * *'
+      timezone: Asia/Shanghai
   workflow_dispatch:
     inputs:
       repositories:
