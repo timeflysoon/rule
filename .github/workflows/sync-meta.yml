@@ -1,4 +1,4 @@
-# 文件名: .github/workflows/sync-meta.yml
+# 文件名: .github/workflows/sync-meta-folders.yml
 # 日常使用的同步工作流 - 与源仓库完全一致
 
 name: Sync Meta Folders Only
@@ -7,7 +7,7 @@ on:
   schedule:
     - cron: '30 18 * * *'  # UTC 18:30 = 北京时间第二天 2:30
     - cron: '30 6 * * *'   # UTC 6:30 = 北京时间 14:30
-  workflow_dispatch:   # 移除 force_sync 输入，直接每次都强制镜像同步
+  workflow_dispatch:     # 无强制选项，每次都完整镜像同步
 
 permissions:
   contents: write
@@ -35,59 +35,65 @@ jobs:
           SOURCE_DIR="/tmp/meta-source-$(date +%s)"
           echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
           
-          echo "克隆源仓库 meta 分支..."
+          echo "正在克隆源仓库 meta 分支..."
           git clone --depth=1 --branch=meta https://github.com/MetaCubeX/meta-rules-dat.git "$SOURCE_DIR"
           
-          echo "源仓库结构:"
+          echo "源仓库根目录结构:"
           ls -la "$SOURCE_DIR/"
+          echo "源仓库完整结构（递归）:"
+          find "$SOURCE_DIR" -type d | sort
 
       - name: Force mirror sync meta folder
         id: sync_folders
         run: |
           SOURCE_DIR="${{ steps.clone_source.outputs.source_dir }}"
           
-          echo "删除旧的 meta 文件夹（确保干净环境）..."
+          echo "=== 开始强制镜像同步 ==="
+          echo "删除旧的 meta 文件夹（确保彻底干净）..."
           rm -rf meta
+          echo "旧 meta 已删除，当前工作区 meta 状态:"
+          ls -la | grep meta || echo "meta 已不存在"
           
-          echo "强制镜像同步（带 --delete，确保完全一致）..."
-          rsync -av --delete \
-            --exclude='.git' \
-            --exclude='.github' \
-            "$SOURCE_DIR/" "meta/"
+          echo "创建新 meta 文件夹并完整复制源仓库内容..."
+          mkdir meta
+          cp -r "$SOURCE_DIR"/* meta/
           
-          echo "✅ 镜像同步完成"
+          echo "✅ 镜像同步完成（使用 cp -r 强制完整复制）"
           
-          echo "同步后的 meta 目录结构:"
+          echo "同步后的 meta 根目录结构:"
           ls -la meta/
+          echo "同步后的 meta 完整结构（递归）:"
+          find meta -type d | sort
           
-          # 统计文件夹数量（仅用于提交信息）
-          FOLDER_COUNT=$(find meta -maxdepth 1 -type d 2>/dev/null | tail -n +2 | wc -l)
-          echo "文件夹数量: $FOLDER_COUNT"
+          # 统计子文件夹数量（仅用于日志和提交信息）
+          FOLDER_COUNT=$(find meta -mindepth 1 -type d | wc -l)
+          echo "子文件夹数量: $FOLDER_COUNT"
           echo "folder_count=$FOLDER_COUNT" >> $GITHUB_OUTPUT
 
       - name: Remove any .dat files (just in case)
         run: |
-          echo "确保没有 .dat 文件（与源仓库完全一致）..."
-          if find meta -name "*.dat" -type f 2>/dev/null | grep -q .; then
-            echo "发现 .dat 文件，正在删除..."
+          echo "确保没有残留的 .dat 文件（与源仓库保持一致）..."
+          DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
+          if [ "$DAT_FILES" -gt 0 ]; then
+            echo "发现 $DAT_FILES 个 .dat 文件，正在删除..."
             find meta -name "*.dat" -type f -delete
-            echo "✅ 已删除 .dat 文件"
+            echo "✅ 已删除所有 .dat 文件"
           else
-            echo "✓ 没有 .dat 文件（正确）"
+            echo "✓ 未发现 .dat 文件（正确）"
           fi
 
       - name: Check for git changes
         id: check_git
         run: |
-          echo "检查 Git 变化..."
+          echo "检查 Git 是否有变化..."
           git add meta
           
           if git diff --cached --quiet; then
-            echo "没有 Git 变化"
+            echo "没有 Git 变化（已与源仓库完全一致）"
             echo "has_git_changes=false" >> $GITHUB_OUTPUT
           else
             CHANGED_COUNT=$(git diff --cached --name-only | wc -l)
-            echo "有 $CHANGED_COUNT 个文件变化"
+            echo "检测到 $CHANGED_COUNT 个文件变化，将提交推送"
             echo "has_git_changes=true" >> $GITHUB_OUTPUT
             echo "changed_count=$CHANGED_COUNT" >> $GITHUB_OUTPUT
           fi
@@ -100,13 +106,13 @@ jobs:
           
           COMMIT_MSG="🔄 自动同步: 更新 MetaCubeX meta 文件夹
           
-          保持与源仓库完全一致，镜像所有文件夹和文件（包含删除操作）。
+          通过强制完整镜像同步，保持与源仓库完全一致（包括删除多余文件）。
           
           详细信息:
           - 源仓库: MetaCubeX/meta-rules-dat@meta
           - 同步时间: $TIMESTAMP
           - 变化文件数: $CHANGED_COUNT
-          - 文件夹数: ${{ steps.sync_folders.outputs.folder_count }}
+          - 子文件夹数: ${{ steps.sync_folders.outputs.folder_count }}
           
           由 GitHub Actions 自动镜像同步"
           
@@ -119,8 +125,8 @@ jobs:
         if: steps.check_git.outputs.has_git_changes == 'false'
         run: |
           echo "🎉 已是最新版本，无需更新"
-          echo "当前 meta 目录结构:"
-          ls -la meta/
+          echo "当前 meta 完整结构:"
+          find meta -type d | sort
           echo ""
           echo "与源仓库完全一致 ✓"
 
@@ -141,15 +147,15 @@ jobs:
           echo "同步结果: ${{ steps.check_git.outputs.has_git_changes == 'true' && '已更新' || '无变化' }}"
           
           if [ -d "meta" ]; then
-            echo "meta 目录内容:"
+            echo "meta 根目录内容:"
             ls -la meta/
             
             DAT_FILES=$(find meta -name "*.dat" -type f 2>/dev/null | wc -l)
             if [ "$DAT_FILES" -eq 0 ]; then
               echo "✅ 验证通过: 没有 .dat 文件（与源仓库一致）"
             else
-              echo "⚠️  警告: 发现 $DAT_FILES 个 .dat 文件"
+              echo "⚠️  警告: 仍发现 $DAT_FILES 个 .dat 文件"
             fi
           else
-            echo "❌ 错误: meta 目录不存在"
+            echo "❌ 错误: meta 目录不存在（严重问题）"
           fi
