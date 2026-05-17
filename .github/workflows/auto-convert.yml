@@ -24,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 【关键修复】恢复 Git 仓库中文件的真实修改时间戳
+      # 恢复 Git 文件真实修改时间
       - name: 恢复文件的 Git 原始修改时间戳
         uses: chetan/git-restore-mtime-action@v2
 
@@ -38,61 +38,82 @@ jobs:
           chmod +x "${FILENAME%.gz}"
           mv "${FILENAME%.gz}" clash_meta
 
-      # 核心转换逻辑
+      # ==================== 核心转换逻辑（已修复）====================
       - name: 转换所有 .list → .mrs
         run: |
-          echo "开始扫描 release/ 目录下的 .list 文件..."
+          echo "=== 开始扫描 release/ 目录 ==="
           UPDATED=false
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          FORCE="${{ github.event.inputs.force }}"
 
-          for list_file in release/*.list; do
-            if [ ! -f "$list_file" ]; then
-              echo "未找到任何 .list 文件，跳过。"
-              exit 0
-            fi
+          echo "强制模式: $FORCE"
+          echo "当前目录文件列表:"
+          ls -la release/ || echo "release 目录不存在！"
 
+          # 安全遍历方式
+          shopt -s nullglob
+          list_files=(release/*.list)
+
+          if [ ${#list_files[@]} -eq 0 ]; then
+            echo "❌ 未在 release/ 目录下找到任何 .list 文件！"
+            exit 1
+          fi
+
+          echo "找到 ${#list_files[@]} 个 .list 文件，开始处理..."
+
+          for list_file in "${list_files[@]}"; do
             base_name=$(basename "$list_file" .list)
             mrs_file="release/${base_name}.mrs"
 
             echo "检查: $list_file → $mrs_file"
 
-            # 转换条件：强制模式 或 .mrs不存在 或 .list 比 .mrs 新
-            if [[ "${{ github.event.inputs.force }}" == "true" ]] || \
-               [ ! -f "$mrs_file" ] || \
-               [ "$list_file" -nt "$mrs_file" ]; then
-              
-              echo "→ 执行转换: $list_file"
+            # 转换判断逻辑
+            should_convert=false
+            if [[ "$FORCE" == "true" ]]; then
+              should_convert=true
+              echo "→ 强制转换模式"
+            elif [ ! -f "$mrs_file" ]; then
+              should_convert=true
+              echo "→ .mrs 文件不存在，首次转换"
+            elif [ "$list_file" -nt "$mrs_file" ]; then
+              should_convert=true
+              echo "→ .list 文件有更新，需要转换"
+            fi
+
+            if [ "$should_convert" = true ]; then
+              echo "→ 开始执行转换: $list_file"
               ./clash_meta convert-ruleset domain text "$list_file" "$mrs_file"
               
               if [ $? -eq 0 ]; then
                 echo "✓ 转换成功: $mrs_file"
                 UPDATED=true
-                touch "$mrs_file"   # 确保 mrs 文件时间戳更新为现在
+                touch "$mrs_file"
               else
                 echo "✗ 转换失败: $list_file"
               fi
             else
-              echo "○ 文件无变化，跳过转换"
+              echo "○ 无需转换，跳过"
             fi
           done
 
           echo "UPDATED=$UPDATED" >> $GITHUB_ENV
           echo "LAST_RUN=$TIMESTAMP" >> $GITHUB_ENV
+          echo "=== 转换流程结束 ==="
 
-      # 智能提交
+      # ==================== 智能提交 ====================
       - name: 智能提交变更
         if: env.UPDATED == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+          
           git add release/*.mrs
           
           if git diff --cached --quiet; then
-            echo "文件时间戳有变化但内容无实质差异，跳过提交。"
+            echo "内容无实质变化，跳过提交。"
             exit 0
           fi
 
           git commit -m "chore: auto update ruleset(s) ${LAST_RUN} [skip ci]"
           git push origin main
-          echo "✅ 规则文件已更新并推送"
+          echo "✅ 已提交并推送更新"
