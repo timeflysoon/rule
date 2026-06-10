@@ -2,7 +2,7 @@ name: Update All Fork Repositories
 
 on:
   schedule:
-    # 修正：北京时间 07:20 (UTC 23:20) 和 19:20 (UTC 11:20)
+    # 北京时间 07:20 (UTC 23:20) 和 19:20 (UTC 11:20)
     - cron: '20 11,23 * * *'
   workflow_dispatch:
     inputs:
@@ -10,12 +10,11 @@ on:
         description: |
           要更新的仓库：
           留空 - 仅更新当前仓库
-          all - 更新所有fork仓库
+          all - 更新所有 fork 仓库
           指定 - owner/repo,owner2/repo2
         required: false
         default: "all"
 
-# 防止并发运行
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -26,381 +25,292 @@ permissions:
 jobs:
   update-repos:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: 检查配置
-      run: |
-        if [ -z "${{ secrets.AUTH_PAT }}" ]; then
-          echo "❌ 请先配置 AUTH_PAT"
-          echo "在仓库 Settings → Secrets → Actions 中添加 PAT"
-          echo "PAT 需要 repo 权限"
-          exit 1
-        fi
-        
-    - name: 安装依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq curl
-        
-    - name: 确定更新模式
-      id: determine-mode
-      run: |
-        echo "触发事件: ${{ github.event_name }}"
-        
-        if [ "${{ github.event_name }}" = "schedule" ]; then
-          # 定时任务：默认更新所有fork仓库
-          echo "🕐 定时任务触发，使用 'all' 模式"
-          echo "mode=all" >> $GITHUB_OUTPUT
-        else
-          # 手动触发：使用用户输入
-          USER_INPUT="${{ github.event.inputs.repositories }}"
-          echo "👆 手动触发，用户输入: '$USER_INPUT'"
-          
-          if [ -z "$USER_INPUT" ]; then
-            echo "用户输入为空，更新当前仓库"
-            echo "mode=current" >> $GITHUB_OUTPUT
-          elif [ "$USER_INPUT" = "all" ]; then
-            echo "用户输入 'all'，更新所有fork仓库"
+      - name: 检查配置
+        run: |
+          if [ -z "${{ secrets.AUTH_PAT }}" ]; then
+            echo "❌ 请先配置 AUTH_PAT"
+            echo "在仓库 Settings → Secrets → Actions 中添加 PAT（需 repo 权限）"
+            exit 1
+          fi
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: 确定更新模式
+        id: determine-mode
+        run: |
+          echo "触发事件: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "🕐 定时任务触发，使用 'all' 模式"
             echo "mode=all" >> $GITHUB_OUTPUT
           else
-            echo "用户指定仓库: $USER_INPUT"
-            echo "mode=manual" >> $GITHUB_OUTPUT
+            USER_INPUT="${{ github.event.inputs.repositories }}"
+            echo "👆 手动触发，用户输入: '$USER_INPUT'"
+            if [ -z "$USER_INPUT" ]; then
+              echo "用户输入为空，更新当前仓库"
+              echo "mode=current" >> $GITHUB_OUTPUT
+            elif [ "$USER_INPUT" = "all" ]; then
+              echo "用户输入 'all'，更新所有 fork 仓库"
+              echo "mode=all" >> $GITHUB_OUTPUT
+            else
+              echo "用户指定仓库: $USER_INPUT"
+              echo "mode=manual" >> $GITHUB_OUTPUT
+            fi
           fi
-        fi
-        
-    - name: 获取所有fork仓库列表（如果是all模式）
-      if: steps.determine-mode.outputs.mode == 'all'
-      id: get-all-fork-repos
-      env:
-        GH_TOKEN: ${{ secrets.AUTH_PAT }}
-      run: |
-        echo "🔍 正在获取您所有的fork仓库..."
-        
-        page=1
-        ALL_FORK_REPOS=""
-        
-        while true; do
-          echo "获取第 $page 页..."
-          # 获取响应和HTTP状态码
-          RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: token $GH_TOKEN" \
-                        "https://api.github.com/user/repos?per_page=100&page=$page&type=owner&sort=full_name")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ API 请求失败 (状态码: $HTTP_CODE)"
-            echo "响应: $BODY"
-            # 不退出，继续处理已获取的仓库
-            break
-          fi
-          
-          # 检查响应是否是有效的JSON数组
-          if echo "$BODY" | jq 'type' 2>/dev/null | grep -q "array"; then
-            # 提取fork仓库
-            FORK_REPOS=$(echo "$BODY" | jq -r '.[] | select(.fork == true) | .full_name' | tr '\n' ',')
-            
-            if [ -z "$FORK_REPOS" ] || [ "$FORK_REPOS" = "" ]; then
-              echo "没有更多fork仓库"
+
+      - name: 获取所有 fork 仓库列表（all 模式）
+        if: steps.determine-mode.outputs.mode == 'all'
+        id: get-all-fork-repos
+        env:
+          GH_TOKEN: ${{ secrets.AUTH_PAT }}
+        run: |
+          echo "🔍 正在获取您所有的 fork 仓库..."
+          page=1
+          ALL_FORK_REPOS=""
+
+          while true; do
+            echo "获取第 $page 页..."
+            RESPONSE=$(curl -s -m 15 --retry 3 -w "\n%{http_code}" \
+                          -H "Authorization: token $GH_TOKEN" \
+                          "https://api.github.com/user/repos?per_page=100&page=$page&type=owner&sort=full_name")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "❌ API 请求失败 (状态码: $HTTP_CODE)"
               break
             fi
-            
-            ALL_FORK_REPOS="${ALL_FORK_REPOS}${FORK_REPOS}"
-            REPO_COUNT=$(echo "$FORK_REPOS" | tr ',' '\n' | wc -l)
-            echo "第 $page 页找到 $REPO_COUNT 个fork仓库"
-            
-            # 检查是否是最后一页
+
+            FORK_REPOS=$(echo "$BODY" | jq -r '.[] | select(.fork == true) | .full_name' | tr '\n' ',')
+
+            if [ -n "$FORK_REPOS" ]; then
+              ALL_FORK_REPOS="${ALL_FORK_REPOS}${FORK_REPOS}"
+              REPO_COUNT=$(echo "$FORK_REPOS" | tr ',' '\n' | sed '/^$/d' | wc -l)
+              echo "第 $page 页找到 $REPO_COUNT 个 fork 仓库"
+            else
+              echo "第 $page 页没有 fork 仓库"
+            fi
+
             LENGTH=$(echo "$BODY" | jq '. | length')
             if [ "$LENGTH" -lt 100 ]; then
-              echo "到达最后一页"
+              echo "✅ 到达最后一页"
               break
             fi
-            
+
             page=$((page + 1))
-            
             if [ $page -gt 5 ]; then
               echo "⚠️ 已获取最多 500 个仓库"
               break
             fi
-            
             sleep 1
+          done
+
+          if [ -n "$ALL_FORK_REPOS" ]; then
+            ALL_FORK_REPOS=${ALL_FORK_REPOS%,}
+            TOTAL_COUNT=$(echo "$ALL_FORK_REPOS" | tr ',' '\n' | sed '/^$/d' | wc -l)
+            echo "fork_repositories=$ALL_FORK_REPOS" >> $GITHUB_OUTPUT
+            echo "✅ 共找到 $TOTAL_COUNT 个 fork 仓库"
           else
-            echo "API 响应异常，跳过"
-            break
+            echo "fork_repositories=" >> $GITHUB_OUTPUT
+            echo "⚠️ 未找到任何 fork 仓库"
           fi
-        done
-        
-        if [ -n "$ALL_FORK_REPOS" ]; then
-          ALL_FORK_REPOS=${ALL_FORK_REPOS%,}
-          TOTAL_COUNT=$(echo "$ALL_FORK_REPOS" | tr ',' '\n' | wc -l)
-          echo "fork_repositories=$ALL_FORK_REPOS" >> $GITHUB_OUTPUT
-          echo "✅ 共找到 $TOTAL_COUNT 个fork仓库"
-        else
-          echo "fork_repositories=" >> $GITHUB_OUTPUT
-          echo "⚠️ 未找到任何fork仓库"
-        fi
-        
-    - name: 准备仓库列表
-      id: prepare-repos
-      run: |
-        MODE="${{ steps.determine-mode.outputs.mode }}"
-        USER_INPUT="${{ github.event.inputs.repositories }}"
-        
-        echo "准备模式: $MODE"
-        
-        if [ "$MODE" = "all" ]; then
-          # 使用所有fork仓库
-          FINAL_REPOS="${{ steps.get-all-fork-repos.outputs.fork_repositories }}"
-          if [ -z "$FINAL_REPOS" ]; then
-            echo "⚠️ 未找到fork仓库，更新当前仓库"
+
+      - name: 准备仓库列表
+        id: prepare-repos
+        run: |
+          MODE="${{ steps.determine-mode.outputs.mode }}"
+          USER_INPUT="${{ github.event.inputs.repositories }}"
+
+          if [ "$MODE" = "all" ]; then
+            FINAL_REPOS="${{ steps.get-all-fork-repos.outputs.fork_repositories }}"
+            if [ -z "$FINAL_REPOS" ]; then
+              FINAL_REPOS="${{ github.repository }}"
+            fi
+          elif [ "$MODE" = "current" ]; then
             FINAL_REPOS="${{ github.repository }}"
           else
-            echo "🚀 将更新所有fork仓库"
+            FINAL_REPOS="$USER_INPUT"
           fi
-        elif [ "$MODE" = "current" ]; then
-          # 仅当前仓库
-          FINAL_REPOS="${{ github.repository }}"
-          echo "📍 将更新当前仓库: $FINAL_REPOS"
-        else
-          # 手动指定的仓库
-          FINAL_REPOS="$USER_INPUT"
-          echo "🎯 将更新指定仓库: $FINAL_REPOS"
-        fi
-        
-        # 清理格式
-        FINAL_REPOS=$(echo "$FINAL_REPOS" | tr -d ' ' | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
-        
-        echo "repositories=$FINAL_REPOS" >> $GITHUB_OUTPUT
-        REPO_COUNT=$(echo "$FINAL_REPOS" | tr ',' '\n' | wc -l)
-        echo "repo_count=$REPO_COUNT" >> $GITHUB_OUTPUT
-        
-    - name: 更新仓库 (API同步 - 核心修复)
-      id: update-repos
-      env:
-        REPOSITORIES: ${{ steps.prepare-repos.outputs.repositories }}
-        GH_TOKEN: ${{ secrets.AUTH_PAT }}
-      run: |
-        echo "🔄 开始通过 GitHub API 同步仓库..."
-        echo "仓库列表: $REPOSITORIES"
-        echo "总仓库数: ${{ steps.prepare-repos.outputs.repo_count }}"
-        
-        if [ -z "$REPOSITORIES" ]; then
-          echo "❌ 错误：未指定要同步的仓库"
-          exit 1
-        fi
-        
-        IFS=',' read -ra REPO_ARRAY <<< "$REPOSITORIES"
-        
-        UPDATED_REPOS=0
-        UP_TO_DATE_REPOS=0
-        SKIPPED_REPOS=0
-        FAILED_REPOS=0
-        SKIPPED_REPO_NAMES=""
-        FAILED_REPO_NAMES=""
-        
-        for TARGET_REPO in "${REPO_ARRAY[@]}"; do
-          echo ""
-          echo "========================================"
-          CURRENT_INDEX=$((UPDATED_REPOS + UP_TO_DATE_REPOS + SKIPPED_REPOS + FAILED_REPOS + 1))
-          echo "🔄 同步仓库 ($CURRENT_INDEX/${#REPO_ARRAY[@]}): $TARGET_REPO"
-          echo "========================================"
-          
-          # 跳过空值
-          if [ -z "$TARGET_REPO" ]; then
-            echo "跳过空仓库名"
-            SKIPPED_REPOS=$((SKIPPED_REPOS + 1))
-            continue
+
+          FINAL_REPOS=$(echo "$FINAL_REPOS" | tr -d ' ' | sed 's/,,*/,/g' | sed 's/^,//' | sed 's/,$//')
+          echo "repositories=$FINAL_REPOS" >> $GITHUB_OUTPUT
+          REPO_COUNT=$(echo "$FINAL_REPOS" | tr ',' '\n' | sed '/^$/d' | wc -l)
+          echo "repo_count=$REPO_COUNT" >> $GITHUB_OUTPUT
+
+      - name: 更新仓库 (API 同步)
+        id: update-repos
+        env:
+          REPOSITORIES: ${{ steps.prepare-repos.outputs.repositories }}
+          GH_TOKEN: ${{ secrets.AUTH_PAT }}
+        run: |
+          echo "🔄 开始通过 GitHub API 同步仓库..."
+          echo "仓库列表: $REPOSITORIES"
+          echo "总仓库数: ${{ steps.prepare-repos.outputs.repo_count }}"
+
+          if [ -z "$REPOSITORIES" ]; then
+            echo "❌ 错误：未指定要同步的仓库"
+            exit 1
           fi
-          
-          # 1. 检查仓库是否存在且为fork
-          echo "🔍 检查仓库信息..."
-          REPO_INFO=$(curl -s -H "Authorization: token $GH_TOKEN" \
-                        "https://api.github.com/repos/$TARGET_REPO")
-          
-          ERROR_MSG=$(echo "$REPO_INFO" | jq -r '.message // empty')
-          
-          if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
-            echo "❌ 获取仓库信息失败: $ERROR_MSG"
-            FAILED_REPOS=$((FAILED_REPOS + 1))
-            FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\"$TARGET_REPO\", "
-            continue
-          fi
-          
-          IS_FORK=$(echo "$REPO_INFO" | jq -r '.fork // false')
-          if [ "$IS_FORK" != "true" ]; then
-            echo "⚠️ $TARGET_REPO 不是fork仓库，跳过"
-            SKIPPED_REPOS=$((SKIPPED_REPOS + 1))
-            SKIPPED_REPO_NAMES="${SKIPPED_REPO_NAMES}\"$TARGET_REPO\", "
-            continue
-          fi
-          
-          # 2. 获取默认分支
-          DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch // empty')
-          if [ -z "$DEFAULT_BRANCH" ] || [ "$DEFAULT_BRANCH" = "null" ]; then
-            DEFAULT_BRANCH="main"
-          fi
-          echo "🌿 使用分支: $DEFAULT_BRANCH"
-          
-          # 3. 调用 GitHub API 同步 (核心修复)
-          echo "📡 调用 GitHub API 同步..."
-          API_RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$TARGET_REPO/merge-upstream" \
-            -d "{\"branch\":\"$DEFAULT_BRANCH\"}")
-          
-          # 分离响应体和状态码
-          HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
-          RESPONSE_BODY=$(echo "$API_RESPONSE" | sed '$d')
-          
-          echo "📊 API 响应状态码: $HTTP_CODE"
-          
-          # 4. 根据状态码处理结果
-          case $HTTP_CODE in
-            200)
-              MERGE_TYPE=$(echo "$RESPONSE_BODY" | jq -r '.merge_type // "fast-forward"' 2>/dev/null || echo "fast-forward")
-              # 核心修正：当上游无更新返回 none 时，精准划归为已是最新
-              if [ "$MERGE_TYPE" = "none" ]; then
-                echo "⏭️ 已是最新: (无需同步)"
-                UP_TO_DATE_REPOS=$((UP_TO_DATE_REPOS + 1))
-              else
-                echo "✅ 同步成功 ($MERGE_TYPE)"
-                UPDATED_REPOS=$((UPDATED_REPOS + 1))
-              fi
-              ;;
-            422)
-              ERROR_MSG=$(echo "$RESPONSE_BODY" | jq -r '.message // "已是最新"')
-              echo "⏭️ 已是最新: $ERROR_MSG"
-              UP_TO_DATE_REPOS=$((UP_TO_DATE_REPOS + 1))
-              ;;
-            409)
-              echo "⚠️ 存在合并冲突，需要手动解决"
+
+          UPDATED_REPOS=0
+          UP_TO_DATE_REPOS=0
+          SKIPPED_REPOS=0
+          FAILED_REPOS=0
+          SKIPPED_REPO_NAMES=""
+          FAILED_REPO_NAMES=""
+
+          TOTAL_REPOS="${{ steps.prepare-repos.outputs.repo_count }}"
+
+          for TARGET_REPO in $(echo "$REPOSITORIES" | tr ',' ' '); do
+            TARGET_REPO=$(echo "$TARGET_REPO" | xargs)
+            if [ -z "$TARGET_REPO" ]; then continue; fi
+
+            echo ""
+            echo "========================================"
+            CURRENT_INDEX=$((UPDATED_REPOS + UP_TO_DATE_REPOS + SKIPPED_REPOS + FAILED_REPOS + 1))
+            echo "🔄 同步仓库 ($CURRENT_INDEX/$TOTAL_REPOS): $TARGET_REPO"
+            echo "========================================"
+
+            REPO_INFO=$(curl -s -m 15 --retry 3 -H "Authorization: token $GH_TOKEN" \
+                          "https://api.github.com/repos/$TARGET_REPO")
+
+            ERROR_MSG=$(echo "$REPO_INFO" | jq -r '.message // empty')
+            if [ -n "$ERROR_MSG" ] && [ "$ERROR_MSG" != "null" ]; then
+              echo "❌ 获取仓库信息失败: $ERROR_MSG"
+              FAILED_REPOS=$((FAILED_REPOS + 1))
+              FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\`$TARGET_REPO\`, "
+              continue
+            fi
+
+            IS_FORK=$(echo "$REPO_INFO" | jq -r '.fork // false')
+            if [ "$IS_FORK" != "true" ]; then
+              echo "⚠️ $TARGET_REPO 不是 fork 仓库，跳过"
               SKIPPED_REPOS=$((SKIPPED_REPOS + 1))
-              SKIPPED_REPO_NAMES="${SKIPPED_REPO_NAMES}\"$TARGET_REPO\", "
-              ;;
-            403|404)
-              ERROR_MSG=$(echo "$RESPONSE_BODY" | jq -r '.message // "权限或仓库不存在"')
-              echo "❌ 同步失败 ($HTTP_CODE): $ERROR_MSG"
-              FAILED_REPOS=$((FAILED_REPOS + 1))
-              FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\"$TARGET_REPO\", "
-              ;;
-            *)
-              echo "❓ 未知响应 ($HTTP_CODE)"
-              echo "$RESPONSE_BODY"
-              FAILED_REPOS=$((FAILED_REPOS + 1))
-              FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\"$TARGET_REPO\", "
-              ;;
-          esac
-          
-          # 避免API速率限制
-          sleep 0.5
-        done
-        
-        # 清理末尾多余的逗号和空格
-        SKIPPED_REPO_NAMES=$(echo "$SKIPPED_REPO_NAMES" | sed 's/, $//')
-        FAILED_REPO_NAMES=$(echo "$FAILED_REPO_NAMES" | sed 's/, $//')
-        
-        echo ""
-        echo "🎉 API 同步完成！"
-        echo "📊 统计："
-        echo "  ✅ 成功同步: $UPDATED_REPOS"
-        echo "  ⏭️  已是最新: $UP_TO_DATE_REPOS"
-        echo "  🔄 跳过: $SKIPPED_REPOS"
-        if [ -n "$SKIPPED_REPO_NAMES" ]; then
-          echo "  🔄 跳过仓库: $SKIPPED_REPO_NAMES"
-        else
-          echo "  🔄 跳过仓库: 无"
-        fi
-        echo "  ❌ 失败: $FAILED_REPOS"
-        if [ -n "$FAILED_REPO_NAMES" ]; then
-          echo "  ❌ 失败仓库: $FAILED_REPO_NAMES"
-        else
-          echo "  ❌ 失败仓库: 无"
-        fi
-        
-        # 设置常规单行输出
-        echo "updated_repos=$UPDATED_REPOS" >> $GITHUB_OUTPUT
-        echo "up_to_date_repos=$UP_TO_DATE_REPOS" >> $GITHUB_OUTPUT
-        echo "skipped_repos=$SKIPPED_REPOS" >> $GITHUB_OUTPUT
-        echo "failed_repos=$FAILED_REPOS" >> $GITHUB_OUTPUT
-        
-        # 利用 EOF 机制将文本安全写入 GITHUB_OUTPUT
-        echo "skipped_repo_names<<EOF" >> $GITHUB_OUTPUT
-        echo "$SKIPPED_REPO_NAMES" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-        
-        echo "failed_repo_names<<EOF" >> $GITHUB_OUTPUT
-        echo "$FAILED_REPO_NAMES" >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
-        
-    - name: 生成报告
-      if: always()
-      env:
-        MODE: ${{ steps.determine-mode.outputs.mode }}
-        REPO_COUNT: ${{ steps.prepare-repos.outputs.repo_count }}
-        UPDATED_REPOS: ${{ steps.update-repos.outputs.updated_repos || 0 }}
-        UP_TO_DATE_REPOS: ${{ steps.update-repos.outputs.up_to_date_repos || 0 }}
-        SKIPPED_REPOS: ${{ steps.update-repos.outputs.skipped_repos || 0 }}
-        FAILED_REPOS: ${{ steps.update-repos.outputs.failed_repos || 0 }}
-        SKIPPED_REPO_NAMES: ${{ steps.update-repos.outputs.skipped_repo_names || '' }}
-        FAILED_REPO_NAMES: ${{ steps.update-repos.outputs.failed_repo_names || '' }}
-      run: |
-        echo "## 📊 仓库更新报告" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**更新时间:** $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
-        echo "**触发方式:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "**更新模式:** $MODE" >> $GITHUB_STEP_SUMMARY
-        echo "**目标仓库数:** $REPO_COUNT 个" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        
-        if [ "${{ job.status }}" = "success" ]; then
-          echo "**状态:** ✅ 更新任务执行完成" >> $GITHUB_STEP_SUMMARY
+              SKIPPED_REPO_NAMES="${SKIPPED_REPO_NAMES}\`$TARGET_REPO\`, "
+              continue
+            fi
+
+            DEFAULT_BRANCH=$(echo "$REPO_INFO" | jq -r '.default_branch // "main"')
+            echo "🌿 使用分支: $DEFAULT_BRANCH"
+
+            API_RESPONSE=$(curl -s -m 15 --retry 3 -w "\n%{http_code}" \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$TARGET_REPO/merge-upstream" \
+              -d "{\"branch\":\"$DEFAULT_BRANCH\"}")
+
+            HTTP_CODE=$(echo "$API_RESPONSE" | tail -n1)
+            RESPONSE_BODY=$(echo "$API_RESPONSE" | sed '$d')
+
+            echo "📊 API 响应状态码: $HTTP_CODE"
+
+            case $HTTP_CODE in
+              200)
+                MERGE_TYPE=$(echo "$RESPONSE_BODY" | jq -r '.merge_type // "fast-forward"' 2>/dev/null || echo "fast-forward")
+                if [ "$MERGE_TYPE" = "none" ]; then
+                  echo "⏭️ 已是最新: (无需同步)"
+                  UP_TO_DATE_REPOS=$((UP_TO_DATE_REPOS + 1))
+                else
+                  echo "✅ 同步成功 ($MERGE_TYPE)"
+                  UPDATED_REPOS=$((UPDATED_REPOS + 1))
+                fi
+                ;;
+              204|422)
+                echo "⏭️ 已是最新"
+                UP_TO_DATE_REPOS=$((UP_TO_DATE_REPOS + 1))
+                ;;
+              409)
+                echo "⚠️ 存在合并冲突，需要手动解决"
+                SKIPPED_REPOS=$((SKIPPED_REPOS + 1))
+                SKIPPED_REPO_NAMES="${SKIPPED_REPO_NAMES}\`$TARGET_REPO\`, "
+                ;;
+              403|404)
+                ERROR_MSG=$(echo "$RESPONSE_BODY" | jq -r '.message // "权限或仓库不存在"')
+                echo "❌ 同步失败 ($HTTP_CODE): $ERROR_MSG"
+                FAILED_REPOS=$((FAILED_REPOS + 1))
+                FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\`$TARGET_REPO\`, "
+                ;;
+              *)
+                echo "❓ 未知响应 ($HTTP_CODE)"
+                FAILED_REPOS=$((FAILED_REPOS + 1))
+                FAILED_REPO_NAMES="${FAILED_REPO_NAMES}\`$TARGET_REPO\`, "
+                ;;
+            esac
+
+            sleep 1
+          done
+
+          SKIPPED_REPO_NAMES=$(echo "$SKIPPED_REPO_NAMES" | sed 's/, $//')
+          FAILED_REPO_NAMES=$(echo "$FAILED_REPO_NAMES" | sed 's/, $//')
+
+          echo ""
+          echo "🎉 API 同步完成！"
+          echo "📊 统计：成功 $UPDATED_REPOS | 已是最新 $UP_TO_DATE_REPOS | 跳过 $SKIPPED_REPOS | 失败 $FAILED_REPOS"
+
+          echo "updated_repos=$UPDATED_REPOS" >> $GITHUB_OUTPUT
+          echo "up_to_date_repos=$UP_TO_DATE_REPOS" >> $GITHUB_OUTPUT
+          echo "skipped_repos=$SKIPPED_REPOS" >> $GITHUB_OUTPUT
+          echo "failed_repos=$FAILED_REPOS" >> $GITHUB_OUTPUT
+
+          echo "skipped_repo_names<<EOF" >> $GITHUB_OUTPUT
+          echo "$SKIPPED_REPO_NAMES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "failed_repo_names<<EOF" >> $GITHUB_OUTPUT
+          echo "$FAILED_REPO_NAMES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 生成报告
+        if: always()
+        env:
+          MODE: ${{ steps.determine-mode.outputs.mode }}
+          REPO_COUNT: ${{ steps.prepare-repos.outputs.repo_count }}
+          UPDATED_REPOS: ${{ steps.update-repos.outputs.updated_repos || 0 }}
+          UP_TO_DATE_REPOS: ${{ steps.update-repos.outputs.up_to_date_repos || 0 }}
+          SKIPPED_REPOS: ${{ steps.update-repos.outputs.skipped_repos || 0 }}
+          FAILED_REPOS: ${{ steps.update-repos.outputs.failed_repos || 0 }}
+          SKIPPED_REPO_NAMES: ${{ steps.update-repos.outputs.skipped_repo_names || '' }}
+          FAILED_REPO_NAMES: ${{ steps.update-repos.outputs.failed_repo_names || '' }}
+        run: |
+          echo "## 📊 仓库更新报告" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📈 更新统计" >> $GITHUB_STEP_SUMMARY
+          echo "**更新时间:** $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') (北京时间)" >> $GITHUB_STEP_SUMMARY
+          echo "**触发方式:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**更新模式:** $MODE" >> $GITHUB_STEP_SUMMARY
+          echo "**目标仓库数:** $REPO_COUNT 个" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| 状态 | 仓库数 | 说明 |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ✅ 成功同步 | $UPDATED_REPOS | 通过 GitHub API 同步了上游更新 |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏭️ 已是最新 | $UP_TO_DATE_REPOS | 所有分支已是最新 |" >> $GITHUB_STEP_SUMMARY
-          
-          # 已成功剔除原本冗余的 “🔄 跳过” 和 “❌ 失败” 行
-          if [ -n "$SKIPPED_REPO_NAMES" ]; then
-            echo "| 🔄 跳过仓库 | $SKIPPED_REPOS | \`$SKIPPED_REPO_NAMES\` |" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "**状态:** ✅ 更新任务执行完成" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📈 更新统计" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| 状态 | 仓库数 | 说明 |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|--------|------|" >> $GITHUB_STEP_SUMMARY
+            echo "| ✅ 成功同步 | $UPDATED_REPOS | 通过 GitHub API 同步了上游更新 |" >> $GITHUB_STEP_SUMMARY
+            echo "| ⏭️ 已是最新 | $UP_TO_DATE_REPOS | 所有分支已是最新 |" >> $GITHUB_STEP_SUMMARY
+
+            DISPLAY_SKIPPED="${SKIPPED_REPO_NAMES:-无}"
+            DISPLAY_FAILED="${FAILED_REPO_NAMES:-无}"
+
+            echo "| 🔄 跳过仓库 | $SKIPPED_REPOS | $DISPLAY_SKIPPED |" >> $GITHUB_STEP_SUMMARY
+            echo "| ❌ 失败仓库 | $FAILED_REPOS | $DISPLAY_FAILED |" >> $GITHUB_STEP_SUMMARY
+            echo "| 📦 总计 | $REPO_COUNT | 目标仓库总数 |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 🔄 下次自动更新时间 (北京时间)" >> $GITHUB_STEP_SUMMARY
+            echo "- 07:20（早晨）" >> $GITHUB_STEP_SUMMARY
+            echo "- 19:20（晚上）" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| 🔄 跳过仓库 | $SKIPPED_REPOS | 无 |" >> $GITHUB_STEP_SUMMARY
+            echo "**状态:** ❌ 更新任务执行失败" >> $GITHUB_STEP_SUMMARY
+            echo "请查看详细日志了解错误信息。" >> $GITHUB_STEP_SUMMARY
           fi
-          
-          if [ -n "$FAILED_REPO_NAMES" ]; then
-            echo "| ❌ 失败仓库 | $FAILED_REPOS | \`$FAILED_REPO_NAMES\` |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ❌ 失败仓库 | $FAILED_REPOS | 无 |" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "| 📦 总计 | $REPO_COUNT | 目标仓库总数 |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### 📝 说明" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. **服务器端同步**：使用 GitHub 官方 \`/merge-upstream\` API（网页 'Sync fork' 按钮的底层机制）" >> $GITHUB_STEP_SUMMARY
-          echo "2. **安全无推送**：不会产生 push 事件，不会触发 fork 仓库里的 Action 工作流" >> $GITHUB_STEP_SUMMARY
-          echo "3. **极速完成**：纯 API 调用，无克隆操作，40个仓库预计 1-2 分钟内完成" >> $GITHUB_STEP_SUMMARY
-          echo "4. **定时任务**：自动同步所有fork仓库的默认分支" >> $GITHUB_STEP_SUMMARY
-          echo "5. **手动触发**：支持多种输入方式" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          echo "### 🔄 下次自动更新时间 (北京时间)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- 07:20 (早晨)" >> $GITHUB_STEP_SUMMARY
-          echo "- 19:20 (晚上)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> ⚠️ 注意：定时任务默认同步所有fork仓库，如需修改请在手动触发时指定" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "**状态:** ❌ 更新任务执行失败" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "请查看详细日志了解错误信息。" >> $GITHUB_STEP_SUMMARY
-        fi
 
 # ========================================
 # 1、不触发其他仓库的 Actions，直接调用 GitHub 官方API：POST /repos/{owner}/{repo}/merge-upstream，这就是网页上"Sync fork"按钮的底层机制，服务器端直接 fast-forward 或 merge 默认分支，不会产生 push 事件，因此绝对不会触发 fork 仓库里的 on: push workflows。
