@@ -252,7 +252,17 @@ jobs:
 
           echo ""
           echo "🎉 API 同步完成！"
-          echo "📊 统计：成功 $UPDATED_REPOS | 已是最新 $UP_TO_DATE_REPOS | 跳过 $SKIPPED_REPOS | 失败 $FAILED_REPOS"
+          echo "📊 统计："
+          echo " ✅ 成功同步: $UPDATED_REPOS"
+          echo " ⏭️ 已是最新: $UP_TO_DATE_REPOS"
+          echo " 🔄 跳过: $SKIPPED_REPOS"
+          echo " ❌ 失败: $FAILED_REPOS"
+          if [ -n "$SKIPPED_REPO_NAMES" ]; then
+            echo " 🔄 跳过仓库: $SKIPPED_REPO_NAMES"
+          fi
+          if [ -n "$FAILED_REPO_NAMES" ]; then
+            echo " ❌ 失败仓库: $FAILED_REPO_NAMES"
+          fi
 
           echo "updated_repos=$UPDATED_REPOS" >> $GITHUB_OUTPUT
           echo "up_to_date_repos=$UP_TO_DATE_REPOS" >> $GITHUB_OUTPUT
