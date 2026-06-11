@@ -1,6 +1,8 @@
 name: Cleanup Workflow Runs
+
 on:
   schedule:
+    # 北京时间每周日 00:00
     - cron: '0 16 * * 6'
   workflow_dispatch:
     inputs:
@@ -24,91 +26,264 @@ permissions:
 jobs:
   cleanup:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+
     steps:
       - name: 获取目标仓库列表
         id: set-repos
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.AUTH_PAT }}
         run: |
-          # PAT 校验
-          [ -z "$GH_TOKEN" ] && echo "❌ AUTH_PAT 未配置，请检查 Secrets 设置" && exit 1
+          set -Eeuo pipefail
 
-          INPUT="${{ github.event.inputs.repositories }}"
+          [ -z "${GH_TOKEN:-}" ] && echo "❌ AUTH_PAT 未配置，请检查 Secrets 设置" && exit 1
+
+          API_HEADERS=(
+            -H "Authorization: token $GH_TOKEN"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          api_get_retry() {
+            local url="$1"
+            local attempt=1
+            local max_attempts=5
+            local body_file header_file retry_after sleep_sec
+
+            body_file=$(mktemp)
+            header_file=$(mktemp)
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              HTTP_CODE=$(curl -sS --connect-timeout 15 --max-time 60 \
+                -D "$header_file" \
+                -o "$body_file" \
+                -w "%{http_code}" \
+                "${API_HEADERS[@]}" \
+                "$url") || HTTP_CODE="000"
+
+              BODY="$(cat "$body_file" 2>/dev/null || true)"
+              retry_after="$(awk 'BEGIN{IGNORECASE=1} $1=="Retry-After:" {gsub("\r","",$2); print $2; exit}' "$header_file" 2>/dev/null || true)"
+
+              if [ "$HTTP_CODE" = "403" ] && { echo "$BODY" | grep -qi "rate limit" || [ -n "${retry_after:-}" ]; }; then
+                sleep_sec="${retry_after:-$((attempt * 15))}"
+                echo "⚠️ 触发 GitHub 速率限制，${sleep_sec}s 后重试..."
+                sleep "$sleep_sec"
+                attempt=$((attempt + 1))
+                continue
+              fi
+
+              case "$HTTP_CODE" in
+                200|201|204|401|403|404|422)
+                  rm -f "$body_file" "$header_file"
+                  return 0
+                  ;;
+                429|500|502|503|000)
+                  echo "⚠️ 请求失败($HTTP_CODE)，${attempt}s 后重试..."
+                  sleep "$attempt"
+                  attempt=$((attempt + 1))
+                  ;;
+                *)
+                  rm -f "$body_file" "$header_file"
+                  return 0
+                  ;;
+              esac
+            done
+
+            rm -f "$body_file" "$header_file"
+            return 1
+          }
+
+          # 校验 Token 是否有效
+          if ! api_get_retry "https://api.github.com/user"; then
+            echo "❌ AUTH_PAT 校验失败，网络异常或 GitHub API 暂时不可用"
+            exit 1
+          fi
+
+          case "$HTTP_CODE" in
+            200) ;;
+            401)
+              echo "❌ AUTH_PAT 无效、已过期，或权限不足"
+              exit 1
+              ;;
+            *)
+              echo "❌ 无法校验 AUTH_PAT（HTTP $HTTP_CODE）"
+              exit 1
+              ;;
+          esac
+
+          EVENT_NAME="${{ github.event_name }}"
+          INPUT="${{ github.event.inputs.repositories || '' }}"
           MODE="current"
-          REPOS="${{ github.repository }}"
+
+          REPO_FILE="$RUNNER_TEMP/cleanup_repositories.txt"
+          : > "$REPO_FILE"
+
+          # schedule 触发时没有 workflow_dispatch inputs，按设计默认走 all
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            INPUT="all"
+          fi
 
           if [ "$INPUT" = "all" ]; then
             MODE="all"
             echo "🔍 获取所有有权限的仓库..."
-            REPOS=$(
-              page=1
-              while true; do
-                BODY=$(curl -sf -H "Authorization: token $GH_TOKEN" \
-                  "https://api.github.com/user/repos?per_page=100&page=$page&affiliation=owner,collaborator") || break
-                ITEMS=$(echo "$BODY" | jq -r '.[].full_name')
-                [ -z "$ITEMS" ] && break
-                echo "$ITEMS"
-                page=$((page + 1))
-                [ $page -gt 20 ] && break
-                sleep 0.5
-              done | paste -sd ','
-            )
-            COUNT=$(echo "$REPOS" | tr ',' '\n' | grep -c .)
-            echo "✅ 共找到 $COUNT 个仓库"
+
+            page=1
+            while true; do
+              if ! api_get_retry "https://api.github.com/user/repos?per_page=100&page=$page&affiliation=owner,collaborator,organization_member"; then
+                echo "❌ 获取仓库列表失败，请稍后重试"
+                exit 1
+              fi
+
+              case "$HTTP_CODE" in
+                200) ;;
+                401)
+                  echo "❌ AUTH_PAT 无效、已过期，或权限不足"
+                  exit 1
+                  ;;
+                403)
+                  echo "❌ 无权获取仓库列表，或触发了 GitHub 限制"
+                  exit 1
+                  ;;
+                *)
+                  echo "❌ 获取仓库列表失败（HTTP $HTTP_CODE）"
+                  exit 1
+                  ;;
+              esac
+
+              ITEMS=$(echo "$BODY" | jq -r '.[]?.full_name // empty')
+              [ -z "$ITEMS" ] && break
+
+              printf '%s\n' "$ITEMS" >> "$REPO_FILE"
+              page=$((page + 1))
+              sleep 0.2
+            done
+
           elif [ -n "$INPUT" ]; then
             MODE="manual"
-            REPOS=$(echo "$INPUT" | tr -d ' ' | tr -s ',')
+            echo "$INPUT" \
+              | tr ',' '\n' \
+              | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+              | sed '/^$/d' \
+              >> "$REPO_FILE"
+          else
+            echo "${{ github.repository }}" >> "$REPO_FILE"
           fi
 
-          echo "repositories=$REPOS" >> $GITHUB_OUTPUT
-          echo "mode=$MODE" >> $GITHUB_OUTPUT
+          # 去重并清理空行
+          awk 'NF && !seen[$0]++' "$REPO_FILE" > "${REPO_FILE}.tmp"
+          mv "${REPO_FILE}.tmp" "$REPO_FILE"
+
+          COUNT=$(awk 'END{print NR+0}' "$REPO_FILE")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ 未找到任何目标仓库"
+            exit 1
+          fi
+
+          echo "✅ 共找到 $COUNT 个仓库"
+          echo "repositories_file=$REPO_FILE" >> "$GITHUB_OUTPUT"
+          echo "repo_count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
       - name: 执行清理
         id: cleanup-run
+        shell: bash
         env:
           KEEP_DAYS: ${{ github.event.inputs.keep_days || '0' }}
-          REPOSITORIES: ${{ steps.set-repos.outputs.repositories }}
+          REPOSITORIES_FILE: ${{ steps.set-repos.outputs.repositories_file }}
           GH_TOKEN: ${{ secrets.AUTH_PAT }}
         run: |
-          # ── 工具函数 ─────────────────────────────────────────────
-          # 带重试的 curl（最多3次，指数退避）
-          curl_retry() {
-            local n=0
-            until [ $n -ge 3 ]; do
-              OUTPUT=$(curl -s -w "\n%{http_code}" "$@") && \
-              HTTP_CODE=$(echo "$OUTPUT" | tail -n1) && \
-              BODY=$(echo "$OUTPUT" | sed '$d') && \
-              [ "$HTTP_CODE" != "429" ] && [ "$HTTP_CODE" != "500" ] && \
-              [ "$HTTP_CODE" != "502" ] && [ "$HTTP_CODE" != "503" ] && return 0
-              n=$((n + 1))
-              echo "⚠️ 请求失败($HTTP_CODE)，${n}s 后重试..."
-              sleep $n
+          set -Eeuo pipefail
+
+          API_HEADERS=(
+            -H "Authorization: token $GH_TOKEN"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28"
+          )
+
+          api_request_retry() {
+            local method="$1"
+            local url="$2"
+            local max_attempts="${3:-5}"
+            local attempt=1
+            local body_file header_file retry_after sleep_sec
+
+            body_file=$(mktemp)
+            header_file=$(mktemp)
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              HTTP_CODE=$(curl -sS --connect-timeout 15 --max-time 60 \
+                -X "$method" \
+                -D "$header_file" \
+                -o "$body_file" \
+                -w "%{http_code}" \
+                "${API_HEADERS[@]}" \
+                "$url") || HTTP_CODE="000"
+
+              BODY="$(cat "$body_file" 2>/dev/null || true)"
+              retry_after="$(awk 'BEGIN{IGNORECASE=1} $1=="Retry-After:" {gsub("\r","",$2); print $2; exit}' "$header_file" 2>/dev/null || true)"
+
+              if [ "$HTTP_CODE" = "403" ] && { echo "$BODY" | grep -qi "rate limit" || [ -n "${retry_after:-}" ]; }; then
+                sleep_sec="${retry_after:-$((attempt * 15))}"
+                echo "⚠️ 触发 GitHub 速率限制，${sleep_sec}s 后重试..."
+                sleep "$sleep_sec"
+                attempt=$((attempt + 1))
+                continue
+              fi
+
+              case "$HTTP_CODE" in
+                200|201|204|401|403|404|422)
+                  rm -f "$body_file" "$header_file"
+                  return 0
+                  ;;
+                429|500|502|503|000)
+                  echo "⚠️ 请求失败($HTTP_CODE)，${attempt}s 后重试..."
+                  sleep "$attempt"
+                  attempt=$((attempt + 1))
+                  ;;
+                *)
+                  rm -f "$body_file" "$header_file"
+                  return 0
+                  ;;
+              esac
             done
+
+            rm -f "$body_file" "$header_file"
             return 1
           }
 
-          # ── 初始化 ───────────────────────────────────────────────
-          KEEP_DAYS=${KEEP_DAYS:-0}
+          KEEP_DAYS="${KEEP_DAYS:-0}"
+          if ! [[ "$KEEP_DAYS" =~ ^[0-9]+$ ]]; then
+            echo "❌ keep_days 必须是非负整数"
+            exit 1
+          fi
+
           THRESHOLD="（无）"
           TIME_FILTER=""
-
           if [ "$KEEP_DAYS" -gt 0 ]; then
-            THRESHOLD=$(date -u -d "${KEEP_DAYS} days ago" '+%Y-%m-%dT%H:%M:%SZ')
+            THRESHOLD=$(date -u -d "-${KEEP_DAYS} days" '+%Y-%m-%dT%H:%M:%SZ')
             TIME_FILTER="&created=%3C${THRESHOLD}"
             echo "📅 保留最近 $KEEP_DAYS 天，阈值: $THRESHOLD"
           else
             echo "⚠️ 将清理所有已完成的工作流运行"
           fi
 
-          IFS=',' read -ra REPO_ARRAY <<< "$REPOSITORIES"
+          mapfile -t REPO_ARRAY < "$REPOSITORIES_FILE"
+
           TOTAL_REPOS=${#REPO_ARRAY[@]}
+          PROCESSED=0
+          SKIPPED_GLOBAL=0
+          ABORTED_GLOBAL=0
           DELETED_GLOBAL=0
           FAILED_GLOBAL=0
-          SKIPPED_GLOBAL=0
-          PROCESSED=0
 
-          # ── 遍历仓库 ─────────────────────────────────────────────
+          MAX_DELETE_RETRIES=4
+          MAX_NO_PROGRESS_ROUNDS=2
+          MAX_ROUNDS_PER_REPO=1000
+
           for TARGET_REPO in "${REPO_ARRAY[@]}"; do
+            [ -z "$TARGET_REPO" ] && continue
+
             PROCESSED=$((PROCESSED + 1))
             echo ""
             echo "━━━ ($PROCESSED/$TOTAL_REPOS) $TARGET_REPO ━━━"
@@ -116,11 +291,12 @@ jobs:
             DELETED=0
             FAILED=0
             SKIPPED=0
-            page=1
+            ABORTED=0
+            ROUND=1
+            NO_PROGRESS_ROUNDS=0
 
-            while true; do
-              if ! curl_retry -H "Authorization: token $GH_TOKEN" \
-                "https://api.github.com/repos/$TARGET_REPO/actions/runs?per_page=100&page=$page&status=completed${TIME_FILTER}"; then
+            while [ "$ROUND" -le "$MAX_ROUNDS_PER_REPO" ]; do
+              if ! api_request_retry "GET" "https://api.github.com/repos/$TARGET_REPO/actions/runs?per_page=100&page=1&status=completed${TIME_FILTER}" 5; then
                 echo "❌ 无法访问仓库，已跳过"
                 SKIPPED=1
                 SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1))
@@ -128,83 +304,158 @@ jobs:
               fi
 
               case "$HTTP_CODE" in
-                404) echo "❌ 仓库不存在或无权访问"; SKIPPED=1; SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1)); break ;;
-                403) echo "❌ 权限不足"; SKIPPED=1; SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1)); break ;;
-                200) ;;
-                *)   echo "❌ API 错误 ($HTTP_CODE)"; SKIPPED=1; SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1)); break ;;
+                200)
+                  ;;
+                401)
+                  echo "❌ Token 无效、已过期，或权限不足"
+                  exit 1
+                  ;;
+                403)
+                  echo "❌ 权限不足或触发限制"
+                  SKIPPED=1
+                  SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1))
+                  break
+                  ;;
+                404)
+                  echo "❌ 仓库不存在或无权访问"
+                  SKIPPED=1
+                  SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1))
+                  break
+                  ;;
+                *)
+                  echo "❌ API 错误 ($HTTP_CODE)"
+                  SKIPPED=1
+                  SKIPPED_GLOBAL=$((SKIPPED_GLOBAL + 1))
+                  break
+                  ;;
               esac
 
-              RUN_IDS=$(echo "$BODY" | jq -r '.workflow_runs[].id' 2>/dev/null)
-              [ -z "$RUN_IDS" ] && echo "✅ 无更多记录" && break
+              mapfile -t RUN_IDS < <(echo "$BODY" | jq -r '.workflow_runs[]?.id | numbers' 2>/dev/null || true)
 
-              COUNT=$(echo "$RUN_IDS" | wc -l)
-              echo "🗑️ 第 $page 页：$COUNT 条待删除"
-              BATCH=0
+              if [ "${#RUN_IDS[@]}" -eq 0 ]; then
+                echo "✅ 无更多记录"
+                break
+              fi
 
-              while IFS= read -r RUN_ID; do
+              COUNT=${#RUN_IDS[@]}
+              echo "🗑️ 第 $ROUND 批：$COUNT 条待处理"
+
+              BATCH_TOTAL=0
+              BATCH_SUCCESS=0
+
+              for RUN_ID in "${RUN_IDS[@]}"; do
+                [ -z "$RUN_ID" ] && continue
+                BATCH_TOTAL=$((BATCH_TOTAL + 1))
                 echo -n "."
-                DEL_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-                  -H "Authorization: token $GH_TOKEN" \
-                  "https://api.github.com/repos/$TARGET_REPO/actions/runs/$RUN_ID")
 
-                if [ "$DEL_CODE" = "204" ]; then
-                  DELETED=$((DELETED + 1))
-                  DELETED_GLOBAL=$((DELETED_GLOBAL + 1))
-                else
+                if ! api_request_retry "DELETE" "https://api.github.com/repos/$TARGET_REPO/actions/runs/$RUN_ID" "$MAX_DELETE_RETRIES"; then
                   FAILED=$((FAILED + 1))
                   FAILED_GLOBAL=$((FAILED_GLOBAL + 1))
+                else
+                  case "$HTTP_CODE" in
+                    204|404)
+                      BATCH_SUCCESS=$((BATCH_SUCCESS + 1))
+                      DELETED=$((DELETED + 1))
+                      DELETED_GLOBAL=$((DELETED_GLOBAL + 1))
+                      ;;
+                    401)
+                      echo ""
+                      echo "❌ Token 无效、已过期，或权限不足"
+                      exit 1
+                      ;;
+                    *)
+                      FAILED=$((FAILED + 1))
+                      FAILED_GLOBAL=$((FAILED_GLOBAL + 1))
+                      ;;
+                  esac
                 fi
 
-                BATCH=$((BATCH + 1))
-                if [ $((BATCH % 10)) -eq 0 ]; then sleep 1; else sleep 0.3; fi
-              done <<< "$RUN_IDS"
+                if [ $((BATCH_TOTAL % 10)) -eq 0 ]; then
+                  sleep 1
+                else
+                  sleep 0.2
+                fi
+              done
 
               echo ""
-              ITEM_COUNT=$(echo "$BODY" | jq -r '.workflow_runs | length')
-              [ "$ITEM_COUNT" -lt 100 ] && break
-              page=$((page + 1))
+
+              # 连续无进展则中止当前仓库，防止 page=1 场景下死循环
+              if [ "$BATCH_SUCCESS" -eq 0 ]; then
+                NO_PROGRESS_ROUNDS=$((NO_PROGRESS_ROUNDS + 1))
+                echo "⚠️ 本轮无删除进展（$NO_PROGRESS_ROUNDS/$MAX_NO_PROGRESS_ROUNDS）"
+
+                if [ "$NO_PROGRESS_ROUNDS" -ge "$MAX_NO_PROGRESS_ROUNDS" ]; then
+                  echo "⚠️ 连续无进展，为避免死循环，终止该仓库后续处理"
+                  ABORTED=1
+                  ABORTED_GLOBAL=$((ABORTED_GLOBAL + 1))
+                  break
+                fi
+              else
+                NO_PROGRESS_ROUNDS=0
+              fi
+
+              ROUND=$((ROUND + 1))
               sleep 0.3
             done
 
+            if [ "$ROUND" -gt "$MAX_ROUNDS_PER_REPO" ]; then
+              echo "⚠️ 达到单仓库最大轮次限制，已停止处理，避免异常长时间运行"
+              ABORTED=1
+              ABORTED_GLOBAL=$((ABORTED_GLOBAL + 1))
+            fi
+
             if [ "$SKIPPED" -eq 0 ]; then
-              echo "✅ 完成：删除 $DELETED 条，失败 $FAILED 条"
+              if [ "$ABORTED" -eq 1 ]; then
+                echo "⚠️ 中止：已删除 $DELETED 条，失败 $FAILED 条"
+              else
+                echo "✅ 完成：已删除 $DELETED 条，失败 $FAILED 条"
+              fi
             fi
           done
 
-          # ── 输出汇总 ─────────────────────────────────────────────
+          COMPLETED_GLOBAL=$((PROCESSED - SKIPPED_GLOBAL - ABORTED_GLOBAL))
+
           echo ""
           echo "══════════════════════════════"
           echo "📋 汇总"
           echo "  处理仓库: $PROCESSED"
-          echo "  成功清理: $((PROCESSED - SKIPPED_GLOBAL))"
-          echo "  跳过:     $SKIPPED_GLOBAL"
+          echo "  正常完成: $COMPLETED_GLOBAL"
+          echo "  中止仓库: $ABORTED_GLOBAL"
+          echo "  跳过仓库: $SKIPPED_GLOBAL"
           echo "  删除记录: $DELETED_GLOBAL"
           echo "  删除失败: $FAILED_GLOBAL"
           echo "══════════════════════════════"
 
           {
             echo "processed=$PROCESSED"
-            echo "deleted=$DELETED_GLOBAL"
+            echo "completed=$COMPLETED_GLOBAL"
+            echo "aborted=$ABORTED_GLOBAL"
             echo "skipped=$SKIPPED_GLOBAL"
+            echo "deleted=$DELETED_GLOBAL"
             echo "failed=$FAILED_GLOBAL"
             echo "threshold=$THRESHOLD"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
 
       - name: 生成摘要报告
         if: always()
+        shell: bash
         env:
-          MODE:      ${{ steps.set-repos.outputs.mode }}
+          MODE: ${{ steps.set-repos.outputs.mode }}
           PROCESSED: ${{ steps.cleanup-run.outputs.processed || 0 }}
-          DELETED:   ${{ steps.cleanup-run.outputs.deleted || 0 }}
-          SKIPPED:   ${{ steps.cleanup-run.outputs.skipped || 0 }}
-          FAILED:    ${{ steps.cleanup-run.outputs.failed || 0 }}
-          KEEP_DAYS: ${{ github.event.inputs.keep_days || 0 }}
+          COMPLETED: ${{ steps.cleanup-run.outputs.completed || 0 }}
+          ABORTED: ${{ steps.cleanup-run.outputs.aborted || 0 }}
+          SKIPPED: ${{ steps.cleanup-run.outputs.skipped || 0 }}
+          DELETED: ${{ steps.cleanup-run.outputs.deleted || 0 }}
+          FAILED: ${{ steps.cleanup-run.outputs.failed || 0 }}
+          KEEP_DAYS: ${{ github.event.inputs.keep_days || '0' }}
           THRESHOLD: ${{ steps.cleanup-run.outputs.threshold || '（无）' }}
         run: |
+          set -Eeuo pipefail
+
           STATUS="${{ job.status }}"
           [ "$STATUS" = "success" ] && ICON="✅" || ICON="❌"
 
-          cat >> $GITHUB_STEP_SUMMARY << EOF
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
           ## 🧹 工作流清理报告
 
           | 项目 | 值 |
@@ -221,7 +472,8 @@ jobs:
           | 项目 | 数量 |
           |------|------|
           | 处理仓库数 | $PROCESSED |
-          | 成功清理 | $((PROCESSED - SKIPPED)) |
+          | 正常完成 | $COMPLETED |
+          | 中止仓库 | $ABORTED |
           | 跳过仓库 | $SKIPPED |
           | 删除记录数 | $DELETED |
           | 删除失败 | $FAILED |
@@ -233,7 +485,7 @@ jobs:
 # 配置说明
 # ══════════════════════════════════════════════
 # 1. 创建 PAT：Settings → Developer settings → Personal access tokens
-#    权限：repo + workflow
+#    建议权限：repo + workflow
 #
 # 2. 添加 Secret：仓库 → Settings → Secrets → Actions → AUTH_PAT
 #
