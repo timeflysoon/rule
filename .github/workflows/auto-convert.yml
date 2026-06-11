@@ -2,13 +2,13 @@ name: 自动转换 list → mrs (release 分支)
 
 on:
   push:
-    branches: [ release ]        # 改成 release 分支
+    branches: [release]
     paths:
       - '*.list'
   workflow_dispatch:
     inputs:
       force:
-        description: '强制转换所有文件'
+        description: '强制重新转换所有文件（内容无变化时不会提交）'
         required: false
         type: boolean
         default: false
@@ -16,93 +16,136 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: auto-convert-release
+  cancel-in-progress: true
+
 jobs:
   convert:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: release          # 关键：切换到 release 分支
-          fetch-depth: 0
+    timeout-minutes: 15
+    env:
+      TARGET_BRANCH: release
+      MIHOMO_VERSION: v1.19.17
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
 
-      - name: 恢复 Git 文件原始时间戳
-        uses: chetan/git-restore-mtime-action@v2
+    steps:
+      - name: 检出 release 分支
+        uses: actions/checkout@v4
+        with:
+          ref: release
+          fetch-depth: 1
 
       - name: 下载 Clash Meta 内核
+        shell: bash
         run: |
-          URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.17/mihomo-linux-amd64-v1.19.17.gz"
-          wget -q "$URL" || wget -q "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.17/mihomo-linux-amd64-compatible-v1.19.17.gz"
-          FILENAME=$(ls *.gz)
-          gzip -d "$FILENAME"
-          chmod +x "${FILENAME%.gz}"
-          mv "${FILENAME%.gz}" clash_meta
+          set -euo pipefail
+          echo "=== 下载 mihomo 内核 ${MIHOMO_VERSION} ==="
+          URL1="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-${MIHOMO_VERSION}.gz"
+          URL2="https://github.com/MetaCubeX/mihomo/releases/download/${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-${MIHOMO_VERSION}.gz"
+          rm -f clash_meta clash_meta.gz
+          download_success=false
+          for url in "$URL1" "$URL2"; do
+            echo "尝试下载: $url"
+            if wget --tries=3 --waitretry=2 --timeout=30 -q -O clash_meta.gz "$url"; then
+              download_success=true
+              echo "✓ 下载成功"
+              break
+            else
+              echo "✗ 下载失败: $url"
+            fi
+          done
+          if [ "$download_success" != "true" ]; then
+            echo "❌ mihomo 内核下载失败"
+            exit 1
+          fi
+          gzip -t clash_meta.gz || { echo "❌ gzip 文件损坏"; exit 1; }
+          gzip -d clash_meta.gz
+          chmod +x clash_meta
+          ./clash_meta -v || { echo "❌ clash_meta 验证失败"; exit 1; }
 
       - name: 转换所有 .list → .mrs
+        shell: bash
         run: |
+          set -euo pipefail
           echo "=== 开始扫描 release 分支根目录 ==="
           UPDATED=false
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          FORCE="${{ github.event.inputs.force }}"
-
+          FAILED=false
+          TIMESTAMP="$(date -u +"%Y-%m-%d %H:%M:%S UTC")"
           shopt -s nullglob
           list_files=(*.list)
 
           if [ ${#list_files[@]} -eq 0 ]; then
-            echo "❌ 未找到任何 .list 文件！"
+            echo "❌ 未找到任何 .list 文件"
             exit 1
           fi
 
-          echo "找到 ${#list_files[@]} 个 .list 文件： ${list_files[*]}"
+          echo "找到 ${#list_files[@]} 个 .list 文件：${list_files[*]}"
+          echo "FORCE=${FORCE}"
 
           for list_file in "${list_files[@]}"; do
             base_name="${list_file%.list}"
             mrs_file="${base_name}.mrs"
+            tmp_file="${mrs_file}.tmp"
+            echo ""
+            echo "── 处理: $list_file → $mrs_file"
 
-            echo "检查: $list_file → $mrs_file"
+            rm -f "$tmp_file"
+            if ./clash_meta convert-ruleset domain text "$list_file" "$tmp_file"; then
+              if [ ! -s "$tmp_file" ]; then
+                echo "✗ 转换失败：输出为空"
+                rm -f "$tmp_file"
+                FAILED=true
+                continue
+              fi
 
-            should_convert=false
-            if [[ "$FORCE" == "true" ]]; then
-              should_convert=true
-              echo "→ 强制转换"
-            elif [ ! -f "$mrs_file" ]; then
-              should_convert=true
-              echo "→ 首次转换（mrs不存在）"
-            elif [ "$list_file" -nt "$mrs_file" ]; then
-              should_convert=true
-              echo "→ .list 有更新"
-            fi
-
-            if [ "$should_convert" = true ]; then
-              echo "→ 执行转换: $list_file"
-              ./clash_meta convert-ruleset domain text "$list_file" "$mrs_file"
-              if [ $? -eq 0 ]; then
-                echo "✓ 转换成功: $mrs_file"
-                UPDATED=true
-                touch "$mrs_file"
+              if [ -f "$mrs_file" ] && cmp -s "$tmp_file" "$mrs_file" && [[ "${FORCE}" != "true" ]]; then
+                echo "○ 内容无变化，跳过"
+                rm -f "$tmp_file"
               else
-                echo "✗ 转换失败: $list_file"
+                mv -f "$tmp_file" "$mrs_file"
+                echo "✓ 已更新: $mrs_file"
+                UPDATED=true
               fi
             else
-              echo "○ 无需转换，跳过"
+              echo "✗ 转换失败: $list_file"
+              rm -f "$tmp_file"
+              FAILED=true
             fi
           done
 
-          echo "UPDATED=$UPDATED" >> $GITHUB_ENV
-          echo "LAST_RUN=$TIMESTAMP" >> $GITHUB_ENV
+          echo "UPDATED=$UPDATED" >> "$GITHUB_ENV"
+          echo "LAST_RUN=$TIMESTAMP" >> "$GITHUB_ENV"
 
-      - name: 智能提交变更
+          if [ "$FAILED" = true ]; then
+            echo "❌ 存在转换失败文件"
+            exit 1
+          fi
+
+      - name: 提交变更
         if: env.UPDATED == 'true'
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          git add *.mrs
-          
+          shopt -s nullglob
+          mrs_files=(*.mrs)
+          if [ ${#mrs_files[@]} -eq 0 ]; then
+            echo "❌ 没有可提交的 .mrs 文件"
+            exit 1
+          fi
+          git add -- "${mrs_files[@]}"
           if git diff --cached --quiet; then
             echo "内容无实质变化，跳过提交"
             exit 0
+          else
+            git commit -m "chore: auto update ruleset(s) ${LAST_RUN} [skip ci]"
+            git push origin "${TARGET_BRANCH}"
+            echo "✅ 已推送到 ${TARGET_BRANCH} 分支"
           fi
 
-          git commit -m "chore: auto update ruleset(s) ${LAST_RUN} [skip ci]"
-          git push origin release
-          echo "✅ 更新完成并推送到 release 分支"
+      - name: 无需更新
+        if: env.UPDATED != 'true'
+        shell: bash
+        run: echo "ℹ️ 没有需要更新的 .mrs 文件"
