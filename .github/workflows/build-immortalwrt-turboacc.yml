@@ -2,17 +2,26 @@ name: Build ImmortalWrt x86_64 with turboacc
 
 on:
   workflow_dispatch:
+    inputs:
+      repo_branch:
+        description: '要编译的 ImmortalWrt 分支'
+        required: true
+        default: 'openwrt-25.12'
+        type: choice
+        options:
+          - openwrt-25.12
+          - openwrt-24.10
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-immortalwrt-${{ github.ref }}
+  group: build-immortalwrt-${{ github.event.inputs.repo_branch }}
   cancel-in-progress: false
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
-  REPO_BRANCH: openwrt-25.12
+  REPO_BRANCH: ${{ github.event.inputs.repo_branch }}
   TARGET: x86
   SUBTARGET: 64
   DEVICE: generic
