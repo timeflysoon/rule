@@ -1,4 +1,13 @@
-name: Build ImmortalWrt x86_64 with turboacc
+name: Build ImmortalWrt Multi-Target TurboACC Packages
+
+# 设计定位说明：这不是"全平台"构建脚本，而是"按厂商分类、每个 subtarget
+# 选一个代表设备"的构建脚本。同一 subtarget 下所有设备共享内核/kmod ABI，
+# 一个代表设备编出来的 turboacc 相关包对该 subtarget 下所有型号都是通用的。
+#
+# 外部依赖风险提示：turboacc 注入脚本(add_turboacc.sh)对内核版本是白名单判断，
+# 目前只接受 6.6 / 6.12 / 6.18。如果 ImmortalWrt 未来某个分支切到其他内核
+# 主线/小版本而上游脚本没更新，"Inject turboacc" 这一步会直接报
+# "Unsupported kernel version" 并失败，这不是本 workflow 的问题，是上游依赖风险。
 
 on:
   workflow_dispatch:
@@ -11,26 +20,186 @@ on:
         options:
           - openwrt-25.12
           - openwrt-24.10
+      build_scope:
+        description: '编译范围 (按厂商分类, all = 全部代表机型)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - x86
+          - arm
+          - rockchip
+          - mediatek
+          - qualcomm
+          - broadcom
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-immortalwrt-${{ github.event.inputs.repo_branch }}
+  group: build-immortalwrt-${{ github.event.inputs.repo_branch }}-${{ github.event.inputs.build_scope }}
   cancel-in-progress: false
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
   REPO_BRANCH: ${{ github.event.inputs.repo_branch }}
-  TARGET: x86
-  SUBTARGET: 64
-  DEVICE: generic
   TURBOACC_SCRIPT: https://raw.githubusercontent.com/mufeng05/turboacc/main/add_turboacc.sh
 
 jobs:
+  # ------------------------------------------------------------------
+  # 第一步：根据 build_scope(厂商分类) 生成本次实际要跑的矩阵(JSON)
+  # 注意：颗粒度是"每个 subtarget 一个代表设备"，不是"每个具体型号"。
+  # ------------------------------------------------------------------
+  prepare-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        run: |
+          set -euxo pipefail
+
+          cat > full_matrix.json <<'EOF'
+          [
+            {
+              "name": "x86_64",
+              "label": "x86_64 (PC/UEFI/VM)",
+              "vendor": "x86",
+              "target": "x86",
+              "subtarget": "64",
+              "device": "generic"
+            },
+            {
+              "name": "armsr_armv8",
+              "label": "ARM64 通用 (UEFI/VM/SBC)",
+              "vendor": "arm",
+              "target": "armsr",
+              "subtarget": "armv8",
+              "device": "generic"
+            },
+            {
+              "name": "armsr_armv7",
+              "label": "ARM32 通用 (UEFI/VM/SBC)",
+              "vendor": "arm",
+              "target": "armsr",
+              "subtarget": "armv7",
+              "device": "generic"
+            },
+            {
+              "name": "rockchip_nanopi_r2s",
+              "label": "FriendlyARM NanoPi R2S (RK3328, 代表 rockchip/armv8 全系)",
+              "vendor": "rockchip",
+              "target": "rockchip",
+              "subtarget": "armv8",
+              "device": "friendlyarm_nanopi-r2s"
+            },
+            {
+              "name": "mediatek_filogic_redmi_ax6000",
+              "label": "红米 AX6000 (联发科 MT7986/Filogic)",
+              "vendor": "mediatek",
+              "target": "mediatek",
+              "subtarget": "filogic",
+              "device": "xiaomi_redmi-router-ax6000"
+            },
+            {
+              "name": "mediatek_mt7622_linksys_e8450",
+              "label": "Linksys E8450 (联发科 MT7622)",
+              "vendor": "mediatek",
+              "target": "mediatek",
+              "subtarget": "mt7622",
+              "device": "linksys_e8450-ubi"
+            },
+            {
+              "name": "ramips_mt7621_xiaomi_4a",
+              "label": "小米路由器 4A 千兆版 (联发科 MT7621, target 历史上归在 ramips)",
+              "vendor": "mediatek",
+              "target": "ramips",
+              "subtarget": "mt7621",
+              "device": "xiaomi_mi-router-4a-gigabit"
+            },
+            {
+              "name": "ipq806x_netgear_r7800",
+              "label": "Netgear R7800 (高通 IPQ8065)",
+              "vendor": "qualcomm",
+              "target": "ipq806x",
+              "subtarget": "generic",
+              "device": "netgear_r7800"
+            },
+            {
+              "name": "ipq40xx_linksys_ea8300",
+              "label": "Linksys EA8300 (高通 IPQ4019)",
+              "vendor": "qualcomm",
+              "target": "ipq40xx",
+              "subtarget": "generic",
+              "device": "linksys_ea8300"
+            },
+            {
+              "name": "qualcommax_ipq807x_dl_wrx36",
+              "label": "Dynalink DL-WRX36 (高通 IPQ807x, WiFi6E)",
+              "vendor": "qualcomm",
+              "target": "qualcommax",
+              "subtarget": "ipq807x",
+              "device": "dynalink_dl-wrx36"
+            },
+            {
+              "name": "bcm27xx_rpi4",
+              "label": "树莓派 4 (博通 BCM2711)",
+              "vendor": "broadcom",
+              "target": "bcm27xx",
+              "subtarget": "bcm2711",
+              "device": "rpi-4"
+            },
+            {
+              "name": "bcm4908_asus_gt_ac5300",
+              "label": "ASUS GT-AC5300 (博通 BCM4908, 设备名待核实, 见 Verify device selection 步骤)",
+              "vendor": "broadcom",
+              "target": "bcm4908",
+              "subtarget": "generic",
+              "device": "asus_gt-ac5300"
+            },
+            {
+              "name": "bcm53xx_netgear_r8000",
+              "label": "Netgear R8000 (博通 BCM4709, 设备名待核实, 见 Verify device selection 步骤)",
+              "vendor": "broadcom",
+              "target": "bcm53xx",
+              "subtarget": "generic",
+              "device": "netgear_r8000"
+            }
+          ]
+          EOF
+
+          SCOPE="${{ github.event.inputs.build_scope }}"
+          if [ "$SCOPE" = "all" ]; then
+            MATRIX=$(jq -c '{include: .}' full_matrix.json)
+          else
+            MATRIX=$(jq -c --arg v "$SCOPE" '{include: [ .[] | select(.vendor == $v) ]}' full_matrix.json)
+          fi
+
+          COUNT=$(echo "$MATRIX" | jq '.include | length')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::build_scope='$SCOPE' 没有匹配到任何矩阵条目，请检查 full_matrix.json 里的 vendor 字段"
+            exit 1
+          fi
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "本次将编译 $COUNT 个平台："
+          echo "$MATRIX" | jq -r '.include[] | "  - \(.label) [\(.target)/\(.subtarget)/\(.device)]"'
+
+  # ------------------------------------------------------------------
+  # 第二步：矩阵内每个平台各跑一个独立 job，互不影响
+  # ------------------------------------------------------------------
   build:
+    needs: prepare-matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      # all 模式下矩阵有 13 个条目，全部并发对 runner 排队/源码镜像访问压力/
+      # 缓存命中率都不友好，限流到 3 是速度与稳定性的折中，想更快可以调大，
+      # 但要接受排队和偶发下载失败概率上升的代价。
+      max-parallel: 3
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
     steps:
       - name: Free disk space
@@ -62,18 +231,19 @@ jobs:
           git clone --depth=1 --branch "${{ env.REPO_BRANCH }}" "${{ env.REPO_URL }}" openwrt
           cd openwrt
           echo "Checked out branch: ${{ env.REPO_BRANCH }}"
+          echo "Target: ${{ matrix.target }}/${{ matrix.subtarget }} device=${{ matrix.device }} (${{ matrix.label }})"
 
       - name: Cache dl
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: ${{ runner.os }}-${{ env.REPO_BRANCH }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-dl
+          key: ${{ runner.os }}-${{ env.REPO_BRANCH }}-${{ matrix.target }}-${{ matrix.subtarget }}-dl
 
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ${{ runner.os }}-${{ env.REPO_BRANCH }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-ccache
+          key: ${{ runner.os }}-${{ env.REPO_BRANCH }}-${{ matrix.target }}-${{ matrix.subtarget }}-ccache
 
       - name: Update & install feeds
         working-directory: openwrt
@@ -93,29 +263,46 @@ jobs:
         working-directory: openwrt
         run: |
           set -euxo pipefail
+          # 注意：target/subtarget/device 这几段本身就是小写，且可能含连字符
+          # (如 rpi-4、dl-wrx36)，必须原样使用，不能转大写/转下划线，
+          # 否则生成的 CONFIG_TARGET_* 符号不存在，make defconfig 会静默丢弃。
           cat > .config <<EOF
-          CONFIG_TARGET_${{ env.TARGET }}=y
-          CONFIG_TARGET_${{ env.TARGET }}_${{ env.SUBTARGET }}=y
-          CONFIG_TARGET_${{ env.TARGET }}_${{ env.SUBTARGET }}_DEVICE_${{ env.DEVICE }}=y
+          CONFIG_TARGET_${{ matrix.target }}=y
+          CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y
+          CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }}=y
           CONFIG_PACKAGE_luci-app-turboacc=m
           CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=m
           CONFIG_CCACHE=y
           EOF
           make defconfig
 
-      - name: Show turboacc-related config
+      - name: Verify device selection
         working-directory: openwrt
         run: |
           set -euxo pipefail
+          # 硬性校验：如果 .config 里找不到我们要求的设备选择项，
+          # 说明 matrix 里这条的 target/subtarget/device 名称写错了，
+          # 直接失败，不要浪费几十分钟去编译一个没有目标设备的空结果。
+          if ! grep -q "^CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }}=y" .config; then
+            echo "::error::设备选择项 CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }} 未生效，请核实这个 target/subtarget/device 组合是否存在(可在 make menuconfig 里搜索确认)"
+            exit 1
+          fi
           grep -i turboacc .config
-          grep -i ccache .config
 
       - name: Download package sources
         working-directory: openwrt
         run: |
           set -euxo pipefail
-          make download -j$(nproc)
-          find dl -size -1024c -exec ls -l {} \;
+          make download -j"$(nproc)"
+
+          # 硬失败：下载文件异常小(大概率是网络问题导致的损坏/截断下载)，
+          # 不拦下来的话可能几十分钟后编译才炸，白白浪费 CI 时间。
+          BAD_FILES="$(find dl -type f -size -1024c)"
+          if [ -n "$BAD_FILES" ]; then
+            echo "::error::以下下载文件异常过小，可能下载损坏："
+            echo "$BAD_FILES"
+            exit 1
+          fi
 
       - name: Build firmware and packages
         working-directory: openwrt
@@ -127,20 +314,153 @@ jobs:
       - name: Organize build output
         run: |
           set -euxo pipefail
-          mkdir -p artifact
-          find openwrt/bin/targets -type f \( \
-            -name "*.img.gz" -o \
-            -name "*combined*" -o \
-            -name "*sysupgrade*" -o \
-            -name "*.manifest" -o \
-            -name "sha256sums" \
-          \) -exec cp -f {} artifact/ \;
-          find openwrt/bin/packages -type f -iname "*turboacc*" -exec cp -f {} artifact/ \;
-          ls -lh artifact/
+          mkdir -p artifact/targets artifact/packages
+
+          # 固件/镜像产物：直接保留 targets 目录内容，比维护一份可能漏项的
+          # 文件名 pattern 列表更稳，不容易漏掉某些平台特有的镜像格式
+          # (*.bin/*.itb/*.ubi/*factory* 等)。
+          cp -a openwrt/bin/targets/*/* artifact/targets/ 2>/dev/null || true
+
+          # turboacc 相关包：不能只抓 "*turboacc*"，add_turboacc.sh 实际注入的
+          # 是 luci-app-turboacc + shortcut-fe + fullconenat + fullconenat-nft
+          # 四个包目录，内核模块产物(kmod-fast-classifier、kmod-shortcut-fe-cm
+          # 之类)文件名大概率不含 "turboacc" 字样，漏了这些等于只装了个空壳
+          # LuCI 界面，底层加速模块根本没打进去。
+          #
+          # 注意：这里不按扩展名过滤(.ipk / .apk 都要)，因为不同分支/不同
+          # 内核阶段 ImmortalWrt 实际产出的包格式并不统一，按扩展名过滤
+          # 会在包管理器切换的分支上悄悄漏掉产物。
+          find openwrt/bin/packages -type f \( \
+            -iname "*turboacc*" -o \
+            -iname "*shortcut-fe*" -o \
+            -iname "*fast-classifier*" -o \
+            -iname "*fullconenat*" \
+          \) -exec cp -f {} artifact/packages/ \;
+
+          find artifact -type f | sort
+
+      - name: Clone makeself (pinned release, not tracking a moving branch)
+        run: |
+          set -euxo pipefail
+          # 钉死到具体 release tag，而不是 clone 默认分支最新代码：
+          # makeself 上游一旦引入 breaking change，我们的 CI 不应该在毫无
+          # 征兆的情况下某天突然坏掉。发现新版本需要的话手动升这个 tag。
+          git clone --depth=1 --branch release-2.7.1 https://github.com/megastep/makeself.git
+
+      - name: Bundle turboacc into a self-extracting run file (makeself)
+        run: |
+          set -euxo pipefail
+          # 不再手搓 marker+tail 的自解压逻辑，改用 makeself：它是被
+          # OpenWrt/嵌入式圈子长期验证过的成熟工具，内置 CRC/SHA256 完整性
+          # 校验(用户在路由器上执行时，文件传输损坏会被直接拦下来，而不是
+          # 等 tar 解压到一半才报个不明所以的错)，比自己维护提取逻辑更稳。
+          #
+          # 这里只按包名前缀通配，不限定扩展名：build 产出的实际后缀可能
+          # 是 .ipk(opkg) 也可能是 .apk(apk-tools)，取决于具体分支用的是
+          # 哪套包管理器，两种都要能找到——按扩展名过滤会在包管理器切换
+          # 的分支上悄悄漏包。
+          MAIN_PKG=$(find artifact/packages -maxdepth 1 -type f -iname "luci-app-turboacc_*" | head -n1 || true)
+          I18N_PKG=$(find artifact/packages -maxdepth 1 -type f -iname "luci-i18n-turboacc-zh-cn_*" | head -n1 || true)
+
+          if [ -z "$MAIN_PKG" ] || [ -z "$I18N_PKG" ]; then
+            echo "::warning::没找到主包或中文包，跳过打包自解压脚本"
+            exit 0
+          fi
+
+          PKGDIR="turboacc-pkg"
+          mkdir -p "$PKGDIR"
+          cp "$MAIN_PKG" "$I18N_PKG" "$PKGDIR/"
+
+          # install.sh 用带引号的 <<'EOF'，确保 $0/$MAIN_PKG/$? 这些变量
+          # 是字面量原样写进文件，留到路由器上运行时才求值。这里踩过反面
+          # 教材：如果写成不带引号的 <<EOF，$? 会在"生成这个文件的当下"
+          # 就被展开成 CI 里上一条命令的退出码，跟路由器上实际装没装成功
+          # 毫无关系——检查形同虚设。
+          cat > "$PKGDIR/install.sh" <<'EOF'
+          #!/bin/sh
+          # turboacc 安装脚本 (由 makeself 解压后在临时目录里执行，
+          # 当前目录下就是本包的所有文件，不需要再猜路径)
+          set -e
+
+          EXPECTED_TARGET="__EXPECTED_TARGET__"
+          EXPECTED_SUBTARGET="__EXPECTED_SUBTARGET__"
+
+          MAIN_PKG=$(find . -maxdepth 1 -type f -iname 'luci-app-turboacc_*' | head -n1)
+          I18N_PKG=$(find . -maxdepth 1 -type f -iname 'luci-i18n-turboacc-zh-cn_*' | head -n1)
+
+          if [ -z "$MAIN_PKG" ] || [ -z "$I18N_PKG" ]; then
+            echo "错误: 未找到主程序包或中文语言包，安装中止" >&2
+            exit 1
+          fi
+
+          # 平台校验：防止把 A 设备编译的包装到 B 设备上导致驱动/内核
+          # 模块不匹配。/etc/openwrt_release 里的 DISTRIB_TARGET 格式固定
+          # 为 "target/subtarget"，这是 OpenWrt/ImmortalWrt 的标准字段。
+          if [ -f /etc/openwrt_release ]; then
+            . /etc/openwrt_release
+            CUR_TARGET="${DISTRIB_TARGET%%/*}"
+            CUR_SUBTARGET="${DISTRIB_TARGET#*/}"
+            if [ -n "$CUR_TARGET" ] && { [ "$CUR_TARGET" != "$EXPECTED_TARGET" ] || [ "$CUR_SUBTARGET" != "$EXPECTED_SUBTARGET" ]; }; then
+              echo "警告: 当前设备平台为 ${CUR_TARGET}/${CUR_SUBTARGET}，" >&2
+              echo "     本安装包编译目标为 ${EXPECTED_TARGET}/${EXPECTED_SUBTARGET}，两者不匹配。" >&2
+              echo "     继续安装可能导致内核模块加载失败甚至设备无法正常启动。" >&2
+              printf "是否仍要继续安装? [y/N] "
+              read -r ANS
+              case "$ANS" in
+                y|Y) : ;;
+                *) echo "已取消安装"; exit 1 ;;
+              esac
+            fi
+          fi
+
+          echo "正在安装 turboacc 主程序与中文语言包..."
+          case "$MAIN_PKG" in
+            *.apk)
+              if ! command -v apk >/dev/null 2>&1; then
+                echo "错误: 安装包为 apk 格式，但系统未找到 apk 命令" >&2
+                exit 1
+              fi
+              # 装本地文件不需要先 apk update：update 是刷新远程仓库索引，
+              # 跟装本地包无关，反而给离线/内网路由器凭空加一个网络失败点。
+              apk add --allow-untrusted "$MAIN_PKG" "$I18N_PKG"
+              ;;
+            *.ipk)
+              if ! command -v opkg >/dev/null 2>&1; then
+                echo "错误: 安装包为 ipk 格式，但系统未找到 opkg 命令" >&2
+                exit 1
+              fi
+              opkg install "$MAIN_PKG" "$I18N_PKG"
+              ;;
+            *)
+              echo "错误: 无法识别的安装包格式: $MAIN_PKG" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "安装完成，请到 LuCI -> 服务 或 网络 中查看 turboacc"
+          EOF
+
+          # EXPECTED_TARGET/EXPECTED_SUBTARGET 占位符替换成本次矩阵的真实
+          # 值，这一步跟上面 heredoc 的引号无关，纯粹是生成阶段的文本替换。
+          sed -i "s/__EXPECTED_TARGET__/${{ matrix.target }}/; s/__EXPECTED_SUBTARGET__/${{ matrix.subtarget }}/" "$PKGDIR/install.sh"
+          chmod +x "$PKGDIR/install.sh"
+
+          INSTALLER="turboacc-install-${{ matrix.name }}.run"
+          ./makeself/makeself.sh --sha256 "$PKGDIR" "$INSTALLER" "TurboACC installer for ${{ matrix.label }}" ./install.sh
+
+          # 自检：用 makeself 自带的 --check 校验内嵌 SHA256，只验证完整性，
+          # 不会触发 install.sh 真正执行，在 CI 阶段就能发现"打出来的
+          # .run 本身已经损坏"这种问题，而不是等用户在路由器上才发现。
+          sh "$INSTALLER" --check
+          echo "自检通过: $INSTALLER 完整性校验正常"
+
+          mv "$INSTALLER" artifact/packages/
+          ls -lh "artifact/packages/$INSTALLER"
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
-          name: immortalwrt-${{ env.REPO_BRANCH }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-turboacc
+          name: immortalwrt-${{ env.REPO_BRANCH }}-${{ matrix.name }}-turboacc
           path: artifact/
           retention-days: 7
+          if-no-files-found: error
