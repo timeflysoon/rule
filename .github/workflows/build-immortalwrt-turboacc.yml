@@ -15,23 +15,31 @@ name: Build ImmortalWrt Multi-Target TurboACC Packages
 # 否则会出现包实际已生成、但因为 glob 用下划线匹配不到连字符命名而被
 # 误判为"缺失"的情况。
 #
-# .config 设计原则（重要，踩过坑）：这里只显式写两行包选择
-# (CONFIG_PACKAGE_luci-app-turboacc=m / CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=m)，
-# 不去猜测/覆盖任何 luci-app-turboacc 内部的 _INCLUDE_XXX 子选项 Kconfig 符号。
-# 原因：add_turboacc.sh 拉取的 luci-app-turboacc 是 mufeng05 在
-# coolsnowwolf/lede 版本基础上又叠了一层 custom Makefile 二次修改的产物，
-# 精确的子选项符号名以该 custom Makefile 为准，本 workflow 没有可靠渠道
-# 逐字核实它。之前一版在这里手写过
-# CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE / _BBR_CCA / _FAST_CLASSIFIER
-# 这类符号，前缀和命名都是凭印象拍出来的，在 .config 里根本不存在对应
-# 定义，defconfig 阶段会被静默丢弃，后面再对着这些编造出来的符号名做硬
-# grep 校验，就必然导致每次构建都在这一步报错退出。教训是：宁可不写，
-# 让 upstream Kconfig 自己的默认值生效(即截图里默认呈现的 Flow
-# Offloading / 兼容全锥形 NAT / BBR / mtk硬件卸载勾选框 这套组合)，也不要
-# 在拿不准精确符号名的情况下手写覆盖。如果以后确认了 mufeng05 custom
-# Makefile 里真实的符号名，需要强制覆盖某个子选项，再补一行
-# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_XXX=y 且要以那份 Makefile 里
-# PKG_CONFIG_DEPENDS 列出的原文为准。
+# .config 设计原则（重要，踩过两次坑，这是第二次修正）：
+#
+# 第一次教训：手写 CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE 这类符号，
+# 前缀和命名都是凭印象拍出来的，defconfig 阶段被静默丢弃，硬校验必然
+# 报错退出。
+#
+# 第二次教训：以为"干脆什么子选项都不写，让 upstream Kconfig 默认值
+# 自己生效"就等于"原汁原味"，结果实测 KMOD_COUNT=0——一个加速内核模块
+# 都没编出来。真相是：luci-app-turboacc 里
+# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING /
+# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_BBR_CCA
+# 这些 _INCLUDE_XXX 子选项在 Kconfig 里默认值是"关"(# ... is not set)，
+# 必须显式写 =y 才会通过 select 机制把 kmod-nft-offload/kmod-tcp-bbr 等
+# 内核模块拉进编译列表。LuCI 页面上默认展示"Flow offloading/BBR"只是
+# 前端下拉框的默认展示值，跟对应内核模块有没有真的编译进固件是两回事。
+# 这两个符号名有第三方真实可用配置样例核实过来源(见下方 CONFIG_PACKAGE_
+# luci-app-turboacc_INCLUDE_OFFLOADING 那行注释)，可以放心显式写。
+#
+# 但"全锥形 NAT1(兼容模式=nft_FULLCONENAT)"是 mufeng05 在 lede 基础版本
+# 之上自己加的功能，精确符号名查不到任何可信第三方来源，为了不重蹈第一次
+# 编符号名的覆辙，这里不手写，改成在 "Generate .config" 步骤里于构建当下
+# 直接从这次真实 clone/注入下来的源码树 Config.in 文件中，用正则动态
+# 提取包含 FULLCONE 字样的真实符号名再写入 .config——用源码树自己的原文，
+# 而不是我记忆/网上查到的名字，这样无论 mufeng05 未来怎么改这个符号名都
+# 不会失配。
 
 on:
   workflow_dispatch:
@@ -307,6 +315,33 @@ jobs:
           echo "检测到以下 turboacc 相关源码目录已注入："
           echo "$FOUND"
 
+      - name: Discover luci-app-turboacc Kconfig options
+        working-directory: openwrt
+        run: |
+          set -euxo pipefail
+          # 不凭记忆/网上查到的信息去猜这次 mufeng05 fork 里精确的 Kconfig
+          # 符号名，而是直接把这次真实注入进源码树的 Makefile/Config.in
+          # 原文打印出来，供人工核对，也供下一步 "Generate .config" 里的
+          # 正则动态提取使用。
+          MAKEFILE=$(find package/turboacc -maxdepth 2 -iname "Makefile" -path "*luci-app-turboacc*" | head -n1 || true)
+          CONFIG_IN=$(find package/turboacc -iname "Config.in" | head -n1 || true)
+
+          echo "=== luci-app-turboacc Makefile 中 PKG_CONFIG_DEPENDS 声明的全部符号 ==="
+          if [ -n "$MAKEFILE" ]; then
+            echo "文件路径: $MAKEFILE"
+            grep -A 20 "PKG_CONFIG_DEPENDS" "$MAKEFILE" || echo "(未找到 PKG_CONFIG_DEPENDS 段)"
+          else
+            echo "::warning::未找到 luci-app-turboacc 的 Makefile"
+          fi
+
+          echo "=== Config.in 原文(真实符号名以此为准) ==="
+          if [ -n "$CONFIG_IN" ]; then
+            echo "文件路径: $CONFIG_IN"
+            cat "$CONFIG_IN"
+          else
+            echo "::warning::未找到 Config.in，全锥形 NAT 相关符号将在下一步动态探测中标记为未探测到"
+          fi
+
       - name: Generate .config
         working-directory: openwrt
         run: |
@@ -315,24 +350,49 @@ jobs:
           # (如 rpi-4、dl-wrx36)，必须原样使用，不能转大写/转下划线，
           # 否则生成的 CONFIG_TARGET_* 符号不存在，make defconfig 会静默丢弃。
           #
-          # 只显式写包选择这两行，字面量对应 add_turboacc.sh 里
-          # cp -rf .../luci-app-turboacc "./package/turboacc" 的目录名，
-          # 这个不会错。有意不写任何 _INCLUDE_XXX 子选项符号——原因见文件
-          # 头部注释：拿不准 mufeng05 custom Makefile 里精确的符号名，
-          # 与其编一个大概率不存在的符号名(defconfig 阶段被静默丢弃，
-          # 后面校验必然失败)，不如直接让 upstream Kconfig 默认值生效，
-          # 也就是"不擅自改动，原汁原味"。
-          cat > .config <<EOF
-          CONFIG_TARGET_${{ matrix.target }}=y
-          CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y
-          CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }}=y
-          CONFIG_PACKAGE_luci-app-turboacc=m
-          CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=m
-          CONFIG_CCACHE=y
-          EOF
+          # INCLUDE_OFFLOADING / INCLUDE_BBR_CCA 这两个符号名有第三方真实
+          # 可用配置样例核实过(同为基于 lede 版 luci-app-turboacc 的
+          # ophub/amlogic-s9xxx-openwrt#232 issue 中确认可用的 .config 片段)，
+          # 对应截图里"快速转发引擎: Flow offloading"和
+          # "TCP拥塞控制算法: BBR"，默认值是关闭的，必须显式写 =y 才会
+          # 通过 Kconfig 的 select 机制把 kmod-nft-offload/kmod-tcp-bbr 等
+          # 内核模块拉进编译列表(这就是上一版实测 KMOD_COUNT=0 的真实原因)。
+          #
+          # 全锥形 NAT1 相关符号不手写，动态从上一步已经打印过的真实
+          # Config.in 原文里用正则提取包含 FULLCONE 字样的符号名，用源码树
+          # 自己的原文，而不是编一个名字。
+          CONFIG_IN=$(find package/turboacc -iname "Config.in" | head -n1 || true)
+          FULLCONE_SYM=""
+          if [ -n "$CONFIG_IN" ]; then
+            FULLCONE_SYM=$(grep -oE 'PACKAGE_luci-app-turboacc_INCLUDE_[A-Za-z0-9_]*FULLCONE[A-Za-z0-9_]*' "$CONFIG_IN" | head -n1 || true)
+          fi
+
+          {
+            echo "CONFIG_TARGET_${{ matrix.target }}=y"
+            echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y"
+            echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }}=y"
+            echo "CONFIG_PACKAGE_luci-app-turboacc=m"
+            echo "CONFIG_PACKAGE_luci-i18n-turboacc-zh-cn=m"
+            echo "CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING=y"
+            echo "CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_BBR_CCA=y"
+            if [ -n "$FULLCONE_SYM" ]; then
+              echo "CONFIG_PACKAGE_${FULLCONE_SYM}=y"
+            fi
+            echo "CONFIG_CCACHE=y"
+          } > .config
+
+          if [ -n "$FULLCONE_SYM" ]; then
+            echo "动态探测到全锥形 NAT 符号: CONFIG_PACKAGE_${FULLCONE_SYM}，已写入 .config"
+          else
+            echo "::warning::未能从 Config.in 动态探测到包含 FULLCONE 字样的符号，本次全锥形 NAT1 功能可能不会被启用，请查看上一步 'Discover luci-app-turboacc Kconfig options' 的输出，人工确认真实符号名后再手动补一行"
+          fi
+
+          # 把探测结果传给后面的 Verify 步骤，避免重复解析
+          echo "TURBOACC_FULLCONE_SYM=${FULLCONE_SYM}" >> "$GITHUB_ENV"
+
           make defconfig
 
-          echo "=== defconfig 展开后，.config 中所有 turboacc 相关行(供人工核对四项功能是否符合预期，本步骤不对这些子选项做任何强制覆盖或校验) ==="
+          echo "=== defconfig 展开后，.config 中所有 turboacc 相关行(供人工核对四项功能是否符合预期) ==="
           grep -i turboacc .config || echo "(未找到任何 turboacc 相关行)"
 
       - name: Verify device selection
@@ -351,15 +411,42 @@ jobs:
           # 这个顶层包 symbol 在 make defconfig 阶段被静默丢弃(比如 Kconfig
           # 依赖没有满足)，"Generate .config" 那一步本身不会报错，必须在
           # 这里主动 grep 出来确认，否则要等几十分钟后编译完成才在打包
-          # 阶段发现产物缺失。这里只校验顶层包名，不校验任何子选项符号——
-          # 子选项符号名是否精确对得上 mufeng05 custom Makefile 无法核实，
-          # 强行校验一个猜出来的符号名只会制造新的假失败。
+          # 阶段发现产物缺失。
           if ! grep -q "^CONFIG_PACKAGE_luci-app-turboacc=m" .config; then
             echo "::error::CONFIG_PACKAGE_luci-app-turboacc=m 未在 .config 中生效，turboacc 包可能未被 defconfig 接受(请检查上一步 Verify turboacc injection 的输出，以及该包在当前内核版本/分支下的 Kconfig 依赖是否满足)"
             exit 1
           fi
 
-          echo "设备与 turboacc 主包配置校验通过。"
+          # 硬性校验 OFFLOADING / BBR_CCA：这两个符号名已经过第三方真实
+          # 可用配置样例核实(见 Generate .config 步骤注释)，不是猜出来的，
+          # 所以可以放心做硬校验——如果被 defconfig 静默丢弃，说明这次
+          # mufeng05 源码树的 Config.in 依赖关系发生了变化，必须提前拦下来，
+          # 而不是等几十分钟后编译完发现 kmod-nft-offload/kmod-tcp-bbr
+          # 缺失(即上一版实测遇到的 KMOD_COUNT=0)。
+          if ! grep -q "^CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING=y" .config; then
+            echo "::error::CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING=y 未在 .config 中生效，FastPath 引擎(Flow offloading)对应的内核模块不会被编译，请查看 Discover 步骤输出的 Config.in 原文，确认该符号是否仍然存在/依赖是否满足"
+            exit 1
+          fi
+          if ! grep -q "^CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_BBR_CCA=y" .config; then
+            echo "::error::CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_BBR_CCA=y 未在 .config 中生效，BBR 拥塞控制对应的内核模块不会被编译，请查看 Discover 步骤输出的 Config.in 原文，确认该符号是否仍然存在/依赖是否满足"
+            exit 1
+          fi
+
+          # 全锥形 NAT 符号是动态探测出来的，不是硬编码的字面量，只有在
+          # "Generate .config" 步骤里确实探测到了该符号(TURBOACC_FULLCONE_SYM
+          # 非空)才做硬校验；如果当时就没探测到，这里再报错没有意义
+          # (属于已知问题，Generate .config 那一步已经用 ::warning:: 提示过)。
+          if [ -n "${TURBOACC_FULLCONE_SYM:-}" ]; then
+            if ! grep -q "^CONFIG_PACKAGE_${TURBOACC_FULLCONE_SYM}=y" .config; then
+              echo "::error::CONFIG_PACKAGE_${TURBOACC_FULLCONE_SYM}=y 未在 .config 中生效，全锥形 NAT1 对应的内核模块不会被编译"
+              exit 1
+            fi
+            echo "全锥形 NAT 符号校验通过: CONFIG_PACKAGE_${TURBOACC_FULLCONE_SYM}=y"
+          else
+            echo "::warning::本次未探测到全锥形 NAT 符号，跳过该项硬校验，请人工核对 Discover 步骤的输出"
+          fi
+
+          echo "设备与 turboacc 配置校验通过。"
           echo "下面是当前 .config 中 turboacc 相关的完整配置(用于人工核对 FastPath引擎/全锥形NAT/BBR/硬件流量卸载 这四项默认值是否符合预期)："
           grep -i turboacc .config
 
