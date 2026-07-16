@@ -505,12 +505,26 @@ jobs:
           # 用 "*fullconenat*" 会漏掉 nftables 版本的 kmod-nft-fullcone。
           # "*tcp-bbr*" 对应 turboacc 默认勾选的 BBR 拥塞控制附属功能
           # (kmod-tcp-bbr)，同样需要显式抓取，否则会被漏掉。
+          #
+          # 教训(实测踩到)：luci-app-turboacc.apk 本身只是 LuCI 控制面板，
+          # 真正的"快速转发引擎"加速能力由它在包 metadata 里声明的依赖
+          # kmod-nft-offload(fw4/nftables) 提供 —— 这是从 Makefile 的
+          # LUCI_DEPENDS 原文里核实的：
+          #   +PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING&&PACKAGE_firewall4:kmod-nft-offload
+          #   +PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING&&PACKAGE_firewall:kmod-ipt-offload
+          # 这个模块文件名不含 turboacc/shortcut-fe/fullcone/tcp-bbr 任何
+          # 关键字，之前的 pattern 会把它漏掉，导致只装 luci-app-turboacc.apk
+          # 时因为离线安装找不到这个依赖而失败("快速转发引擎"这一项等于
+          # 没有)。用 "*nft-offload*" 覆盖 fw4，"*ipt-offload*" 覆盖 fw3，
+          # 两个都要抓，不看当前是 fw3 还是 fw4，让产物本身两种情况都能装。
           find openwrt/bin/packages openwrt/bin/targets -type f \( \
             -iname "*turboacc*" -o \
             -iname "*shortcut-fe*" -o \
             -iname "*fast-classifier*" -o \
             -iname "*fullcone*" -o \
-            -iname "*tcp-bbr*" \
+            -iname "*tcp-bbr*" -o \
+            -iname "*nft-offload*" -o \
+            -iname "*ipt-offload*" \
           \) -exec cp -f {} artifact/packages/ \;
 
           # 规范化改名：主包/中文包 upstream(add_turboacc.sh 每次 curl 下载
@@ -587,6 +601,22 @@ jobs:
             exit 1
           fi
 
+          # 硬性校验(实测踩到的坑)：luci-app-turboacc.apk 只是 LuCI 控制
+          # 面板，它在 apk metadata 里声明依赖 kmod-nft-offload(fw4) 或
+          # kmod-ipt-offload(fw3) 才能提供"快速转发引擎"这个核心加速能力
+          # (依据 Makefile LUCI_DEPENDS 原文，见上面 Organize build output
+          # 步骤的注释)。这个文件名不含 turboacc/fullcone/tcp-bbr 等关键字，
+          # 早期版本的搜索 pattern 会漏掉它，实测后果是：只单独安装
+          # luci-app-turboacc.apk 时，apk 因为离线找不到这个依赖而装不上，
+          # "快速转发引擎"这一项形同虚设。这里不满足于"有 kmod 就行"的
+          # KMOD_COUNT 判断，必须显式确认 offload 模块存在，否则直接拦下来。
+          OFFLOAD_COUNT=$(find artifact/packages -maxdepth 1 -type f \( -iname "*nft-offload*" -o -iname "*ipt-offload*" \) | wc -l)
+          if [ "$OFFLOAD_COUNT" -eq 0 ]; then
+            echo "::error::未找到 kmod-nft-offload/kmod-ipt-offload，luci-app-turboacc 依赖的快速转发引擎(Flow Offloading)内核模块缺失，仅安装 luci-app-turboacc.apk 会因依赖无法解析而失败，中止打包(请检查 Organize build output 步骤的搜索范围)"
+            exit 1
+          fi
+          echo "已确认快速转发引擎依赖的 offload 内核模块存在(共 $OFFLOAD_COUNT 个)"
+
           PKGDIR="turboacc-pkg"
           mkdir -p "$PKGDIR"
           find artifact/packages -maxdepth 1 -type f \( \
@@ -594,7 +624,9 @@ jobs:
             -iname "*shortcut-fe*" -o \
             -iname "*fast-classifier*" -o \
             -iname "*fullcone*" -o \
-            -iname "*tcp-bbr*" \
+            -iname "*tcp-bbr*" -o \
+            -iname "*nft-offload*" -o \
+            -iname "*ipt-offload*" \
           \) -exec cp -f {} "$PKGDIR/" \;
 
           echo "本次打进 $PKGDIR 的文件(含 $KMOD_COUNT 个 kmod)："
