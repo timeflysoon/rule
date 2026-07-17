@@ -16,10 +16,18 @@ name: Build ImmortalWrt Multi-Target TurboACC Packages
 #    里由 LuciTranslation 宏展开出的 Package 段，用的是独立的
 #    PKG_PO_VERSION 变量，必须和 PKG_VERSION 一起显式赋值，
 #    只写一个不会带出另一个。
-# 3) 校验步骤不能把整个 apk 当成普通单一 tar.gz 直接 tar -tzf。
-#    APK v2 是多个串接的 gzip stream / tar segment，.PKGINFO 在
-#    control 段里。必须按 gzip members 顺序解开，再逐段找 .PKGINFO，
-#    然后读取其中的 "pkgver = " 字段。
+# 3) 校验步骤不能对 .apk 的内部格式做任何假设。ImmortalWrt 不同分支/
+#    不同时期生成的 .apk 可能是老式 APK v2（多个串接的 gzip stream，
+#    .PKGINFO 在其中一段 tar 里），也可能是 apk-tools v3 引入的 ADB
+#    (Alpine Data Block) 二进制格式（完全不是 gzip）。正确做法是先读
+#    文件头 2 字节判断是不是标准 gzip magic(1F 8B)：
+#      - 是 gzip -> 按 APK v2 处理，用 zlib.decompressobj 顺序解开
+#        gzip member，禁止在数据里盲扫字节找"疑似 gzip 头"，那样命中
+#        随机字节会解出乱码却不报错，比直接失败更危险。
+#      - 不是 gzip -> 按 ADB v3 处理，用宿主 apk 工具的
+#        `apk adbdump --format json` 解析，不手工逆向这个二进制格式。
+#    解析失败时把文件头 16 字节 hex dump 打到日志里，方便下次确认
+#    实际格式，而不是继续靠猜测/网上搜索的二手描述来改代码。
 # 4) 单独 make package/.../compile（而非完整固件编译）不会自动
 #    触发 tools/install 和 toolchain/install，staging_dir/host/bin
 #    下的 openssl/sed 等 host 工具会缺失，编译时报 Error 127。
@@ -495,6 +503,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p artifact/packages
+          rm -rf artifact/packages/*
 
           # 不重命名，原样保留 apk(连字符)/ipk(下划线) 命名
           find openwrt/bin/packages openwrt/bin/targets -type f \( \
@@ -513,12 +522,51 @@ jobs:
             exit 1
           fi
 
+          # 不对包格式做任何假设，先把每个文件的头部字节和 file 判定
+          # 打到日志里。后续校验步骤会依据实际读到的 magic bytes 分流
+          # 处理（gzip 拼接段 vs ADB v3 二进制），而不是靠猜测或者盲扫。
+          echo "=== 各文件头部诊断（用于判断实际包格式，而非假设） ==="
+          for f in artifact/packages/*; do
+            echo "--- $f ---"
+            xxd -l 32 "$f" || true
+            file "$f" || true
+          done
+
+      - name: Locate host apk tool
+        shell: bash
+        run: |
+          set -euxo pipefail
+          # 不确定当前分支生成的 .apk 到底是老式 gzip 拼接段(APK v2)
+          # 还是新的 ADB 二进制格式(APK v3)，这里只是尽力找宿主 apk
+          # 工具备用；真正的格式判断交给下一步按文件头 magic bytes 分流。
+          # 找不到就留空，不在这一步直接判死刑。
+          APK_BIN=$(find openwrt/staging_dir/host/bin -maxdepth 1 -type f \( -iname "apk" -o -iname "apk.static" \) 2>/dev/null | head -n1 || true)
+
+          if [ -z "$APK_BIN" ]; then
+            echo "::warning::未在 openwrt/staging_dir/host/bin 下找到宿主 apk 工具。如果实际包格式是 ADB v3，后面的校验步骤会因为没有 APK_BIN 而报错；如果是老式 gzip 格式则不受影响。"
+            find openwrt/staging_dir/host/bin -maxdepth 1 -type f 2>/dev/null | sort || true
+            echo "APK_BIN=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if ! "$APK_BIN" adbdump --help >/dev/null 2>&1; then
+            echo "::warning::找到的 apk 工具 ($APK_BIN) 不支持 adbdump 子命令，版本可能与预期不同"
+            "$APK_BIN" --version || true
+            echo "APK_BIN=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo "APK_BIN=$APK_BIN" >> "$GITHUB_ENV"
+          echo "使用的宿主 apk 工具: $APK_BIN"
+          "$APK_BIN" --version
+
       - name: Verify package metadata versions (not just filenames)
         shell: bash
         run: |
           set -euxo pipefail
           python3 - <<'PY'
           import io
+          import json
           import os
           import pathlib
           import re
@@ -528,55 +576,77 @@ jobs:
           import tempfile
           import zlib
 
+          APK_BIN = os.environ.get("APK_BIN", "")
           PKG_DIR = pathlib.Path("artifact/packages")
+          GZIP_MAGIC = b"\x1f\x8b"
 
           def split_gzip_members(blob: bytes):
+              # 仅用于真正以标准 gzip header 开头的文件（APK v2）。
+              # 不做任何字节级搜索/跳过，出错就是出错，不静默吞掉误判。
               parts = []
               rest = blob
               index = 0
               while rest:
                   dz = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                  try:
-                      out = dz.decompress(rest)
-                      out += dz.flush()
-                  except zlib.error as e:
-                      raise RuntimeError(f"gzip member #{index + 1} 解压失败: {e}") from e
-
+                  out = dz.decompress(rest)
+                  out += dz.flush()
                   consumed = len(rest) - len(dz.unused_data)
                   if consumed <= 0:
                       raise RuntimeError(
-                          f"无法推进到下一个 gzip member（offset={len(blob) - len(rest)}）"
+                          f"无法推进到下一个 gzip member（已解析 {index} 个）"
                       )
-
                   parts.append(out)
                   rest = dz.unused_data
                   index += 1
               return parts
 
-          def apk_pkgver(path: pathlib.Path):
+          def apk_pkgver_v2(path: pathlib.Path):
+              """老式 APK v2：多个串接的 gzip stream，每段是 tar，
+              .PKGINFO 在其中一段里。"""
               raw = path.read_bytes()
               members = split_gzip_members(raw)
-
               for idx, member in enumerate(members, start=1):
-                  try:
-                      with tarfile.open(fileobj=io.BytesIO(member), mode="r:") as tf:
-                          for name in tf.getnames():
-                              norm = name[2:] if name.startswith("./") else name
-                              if norm == ".PKGINFO" or norm.endswith("/.PKGINFO"):
-                                  fp = tf.extractfile(name)
-                                  if fp is None:
-                                      raise RuntimeError(f"无法读取 {name}")
-                                  text = fp.read().decode("utf-8", errors="replace")
-                                  for line in text.splitlines():
-                                      if line.startswith("pkgver = "):
-                                          return line.split(" = ", 1)[1].strip(), idx, name
-                                  raise RuntimeError(".PKGINFO 中没有 pkgver = 字段")
-                  except tarfile.TarError:
-                      continue
+                  with tarfile.open(fileobj=io.BytesIO(member), mode="r:") as tf:
+                      for name in tf.getnames():
+                          norm = name[2:] if name.startswith("./") else name
+                          if norm == ".PKGINFO" or norm.endswith("/.PKGINFO"):
+                              fp = tf.extractfile(name)
+                              if fp is None:
+                                  raise RuntimeError(f"无法读取 {name}")
+                              text = fp.read().decode("utf-8", errors="replace")
+                              for line in text.splitlines():
+                                  if line.startswith("pkgver = "):
+                                      return line.split(" = ", 1)[1].strip(), f"apk v2 gzip member#{idx}"
+                              raise RuntimeError(".PKGINFO 中没有 pkgver = 字段")
+              raise RuntimeError("遍历所有 gzip member 后仍未找到 .PKGINFO")
 
-              raise RuntimeError("遍历所有 gzip/tar 段后仍未找到 .PKGINFO")
+          def apk_pkgver_v3(path: pathlib.Path):
+              """新式 APK v3：ADB(Alpine Data Block) 二进制格式，
+              用官方 apk adbdump 子命令解析，不手工逆向二进制。"""
+              if not APK_BIN:
+                  raise RuntimeError(
+                      "文件不是 gzip 开头（非 APK v2），判断为 ADB v3，"
+                      "但没有可用的宿主 apk 工具（APK_BIN 为空），无法解析"
+                  )
+              out = subprocess.check_output(
+                  [APK_BIN, "adbdump", "--format", "json", str(path)],
+                  stderr=subprocess.STDOUT,
+              )
+              data = json.loads(out.decode("utf-8", errors="replace"))
+              pkginfo = data.get("pkginfo") or data.get("info") or {}
+              ver = pkginfo.get("version")
+              if not ver:
+                  raise RuntimeError(f"adbdump JSON 中没有 pkginfo.version 字段，原始输出: {data}")
+              return ver, "apk v3 adbdump pkginfo.version"
+
+          def apk_pkgver(path: pathlib.Path):
+              head = path.read_bytes()[:2]
+              if head == GZIP_MAGIC:
+                  return apk_pkgver_v2(path)
+              return apk_pkgver_v3(path)
 
           def ipk_version(path: pathlib.Path):
+              # .ipk 是传统 ar 归档 (data.tar.gz + control.tar.gz)，格式未变
               with tempfile.TemporaryDirectory() as td:
                   members = subprocess.check_output(["ar", "t", str(path)], text=True).splitlines()
                   control_member = None
@@ -618,7 +688,7 @@ jobs:
 
                       for line in text.splitlines():
                           if line.startswith("Version:"):
-                              return line.split(":", 1)[1].strip(), control_member, control_name
+                              return line.split(":", 1)[1].strip(), f"ipk control member={control_member}"
 
               raise RuntimeError("control 文件里没有 Version: 字段")
 
@@ -631,11 +701,9 @@ jobs:
           for pkg in pkgs:
               try:
                   if pkg.suffix == ".apk":
-                      ver, member_idx, entry = apk_pkgver(pkg)
-                      detail = f"apk member#{member_idx} entry={entry}"
+                      ver, detail = apk_pkgver(pkg)
                   elif pkg.suffix == ".ipk":
-                      ver, control_member, entry = ipk_version(pkg)
-                      detail = f"ipk member={control_member} entry={entry}"
+                      ver, detail = ipk_version(pkg)
                   else:
                       continue
 
@@ -646,11 +714,12 @@ jobs:
                       print(f"[OK] {pkg.name} -> version = {ver} ({detail})", flush=True)
 
               except Exception as e:
-                  print(f"::error::{pkg} 解析失败: {e}", flush=True)
+                  head_hex = pkg.read_bytes()[:16].hex(" ")
+                  print(f"::error::{pkg} 解析失败: {e}（文件头16字节: {head_hex}）", flush=True)
                   fail = True
 
           if fail:
-              print("::error::存在版本号异常的包，构建判定失败", flush=True)
+              print("::error::存在版本号异常或解析失败的包，构建判定失败", flush=True)
               sys.exit(1)
           PY
 
