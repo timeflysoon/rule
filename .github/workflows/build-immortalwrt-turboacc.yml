@@ -26,6 +26,15 @@ name: Build ImmortalWrt Multi-Target TurboACC Packages
 #    必须在编译目标 package 之前显式跑这两步。
 # 5) upload-artifact 自身会把上传内容打成 zip 供下载，不要再手动
 #    zip 一层上传，否则下载下来是 zip 套 zip。
+# 6) 仅执行 tools/install + toolchain/install 仍不足以覆盖内核相关依赖。
+#    turboacc 勾选的 flow offload/fullcone/BBR 等选项会拉起 kernel/kmod
+#    依赖链，进而触发 package/kernel/linux 打包；package/kernel/linux
+#    的打包逻辑直接读取 $(LINUX_DIR)/.config、modules.builtin、
+#    modules.builtin.modinfo，这些文件由 target/linux/compile 产出，
+#    不会被单独的 package 编译自动触发。必须在编译目标 package 之前
+#    显式先跑一次 make target/linux/compile，否则会在
+#    package/kernel/linux 阶段报 "can't open .config" /
+#    "cannot stat modules.builtin" 并整体失败。
 
 on:
   workflow_dispatch:
@@ -444,6 +453,33 @@ jobs:
           # 会缺失，package 编译直接 Error 127。必须显式先跑这两步。
           make tools/install -j"$(nproc)"
           make toolchain/install -j"$(nproc)"
+
+      - name: Prepare target kernel artifacts
+        working-directory: openwrt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export CCACHE_DIR="$HOME/.ccache"
+          # 关键修复：仅 tools/toolchain 还不够。turboacc 开启的
+          # flow offload / fullcone / BBR 等选项会拉起 kernel/kmod
+          # 依赖链，进而触发 package/kernel/linux 打包；该打包逻辑
+          # 直接读取 $(LINUX_DIR)/.config、modules.builtin、
+          # modules.builtin.modinfo，这些文件由 target/linux/compile
+          # 产出，不会被单独的 package 编译自动触发。必须显式先跑一次。
+          make target/linux/compile -j"$(nproc)" V=s || \
+          make target/linux/compile -j1 V=s
+
+          echo "=== kernel artifacts ==="
+          find build_dir -type f \( \
+            -path "*/linux-*/.config" -o \
+            -path "*/linux-*/modules.builtin" -o \
+            -path "*/linux-*/modules.builtin.modinfo" \
+          \) | sort || true
+
+          if ! find build_dir -type f -name "modules.builtin" -path "*/linux-*" | grep -q .; then
+            echo "::error::target/linux/compile 后仍未生成 modules.builtin，内核构建未就绪"
+            exit 1
+          fi
 
       - name: Build turboacc packages only
         working-directory: openwrt
