@@ -1,86 +1,25 @@
 name: Build ImmortalWrt Multi-Target TurboACC Packages
 
-# 每个 subtarget 选一个代表设备编译。同一 subtarget 下所有型号共享
-# 内核/kmod ABI，代表设备编出的 luci-app-turboacc / luci-i18n-turboacc-zh-cn
-# 对该 subtarget 下所有设备通用。
+# 每个 subtarget 选一个代表设备编译，产物仅包含
+# luci-app-turboacc / luci-i18n-turboacc-zh-cn 两个包本身，
+# 依赖的 kmod 由官方源自动解析，不在此打包。
 #
-# 产物只包含 luci-app-turboacc 和 luci-i18n-turboacc-zh-cn 这两个包本身。
-# 它们依赖的 kmod-nft-offload / kmod-tcp-bbr / kmod-nft-fullcone 等属于
-# ImmortalWrt 官方软件源的标准包，与是否安装 turboacc 无关，由 opkg/apk
-# 在路由器安装时自动解析拉取，不在本 workflow 中打包分发。若路由器完全
-# 离线且未配置本地软件源，需自行从官方源下载这些 kmod 放在同一目录一并
-# 安装。
+# 依赖 add_turboacc.sh 的内核版本白名单（当前 6.6/6.12/6.18），
+# 不在白名单内会静默失败。
 #
-# 依赖：add_turboacc.sh 对内核版本做白名单判断（当前 6.6 / 6.12 / 6.18），
-# ImmortalWrt 若切换到白名单外的内核版本，"Inject turboacc" 步骤会失败，
-# 需等待上游脚本更新。
+# 包命名：apk 用连字符，ipk 用下划线，二者不可混用/不做重命名。
 #
-# 包命名：openwrt-25.12 起默认用 apk（包名-版本.apk，连字符），旧分支用
-# ipk（包名_版本_架构.ipk，下划线）。下游查找逻辑需同时兼容两种命名，
-# 且严禁把两种命名规则搞混——本 workflow 不再对产物文件名做任何"规范化"
-# 重命名，原样保留 openwrt 编译产出的版本化文件名。
-#
-# 已知问题修复记录（2026-07-17，第一版）：
-# mufeng05/turboacc 仓库 custom/luci-app-turboacc/Makefile 没有定义
-# PKG_VERSION，而它 include 的 feeds/luci/luci.mk 依赖 git log 自动推导
-# 版本号；但 add_turboacc.sh 是用 cp -rf 把文件硬拷贝进 package/turboacc/
-# 目录，该目录不在 git 仓库里，导致版本推导失败、退化成 "0"。
-#
-# 已知问题修复记录（2026-07-17，第二版 —— 第一版遗留问题，事后证明诊断错误）：
-# 第一版只修补了 package/turboacc/luci-app-turboacc/Makefile，
-# luci-i18n-turboacc-zh-cn 的元数据版本仍是 0。第二版当时误判为
-# "luci-i18n-turboacc-zh-cn 有自己独立的 Makefile，没被遍历到"，把 Fix
-# 步骤改成遍历 package/turboacc/ 下所有 Makefile 逐个修补——这个诊断是
-# 错的，实际遍历不会找到第二个文件，问题依旧存在，只是换了种方式没修好。
-#
-# 已知问题修复记录（2026-07-17，第三版 —— 真正的根因）：
-# 查了 immortalwrt/luci 官方 luci.mk 源码才搞清楚：luci-i18n-turboacc-zh-cn
-# 根本不是独立包目录，而是 luci-app-turboacc/Makefile 被 luci.mk 里的
-# LuciTranslation 宏在同一个文件内循环展开出来的一个 Package/ 段，写在
-# 同一个 Makefile 里。关键是这个宏用的版本变量跟主包不是同一个：
-#   主包:  Package/$(PKG_NAME)                VERSION:=...PKG_VERSION...
-#   i18n:  Package/luci-i18n-$(BASENAME)-$(1) VERSION:=$(PKG_PO_VERSION)
-# PKG_VERSION 和 PKG_PO_VERSION 是两次独立的 findrev 调用（分别对整个
-# 包目录、和单独对 po/ 子目录取 git log），互不继承。第一/二版补丁只写了
-# PKG_VERSION，PKG_PO_VERSION 从未被设置，所以它继续走原来的 git log
-# 推导逻辑——而 package/turboacc/ 目录不在 git 树里，findrev 拿不到该
-# 路径的提交记录，退化成字面量 "0"。这跟 PKG_VERSION 当初退化成 0 是
-# 同一个底层原因（目录不在 git 里），但因为是两个独立变量，修一个不会
-# 带出另一个。
-#
-# 现在的修复方式：
-#   1) "Fix turboacc PKG_VERSION" 改回只改 luci-app-turboacc 这一个
-#      Makefile（本来就只有一个文件，不存在"遍历"的必要），但同时写入
-#      PKG_VERSION 和 PKG_PO_VERSION 两个变量（外加 PKG_RELEASE），
-#      两者都设成一致的值，这样主包和翻译子包的元数据版本才会同时正确。
-#   2) 保留 "Verify package metadata versions" 步骤：直接解析已产出的
-#      apk/ipk 包内 version 元数据字段（不是文件名，也不是 Makefile
-#      里写了什么变量），只要有任一个是 0 或空立即失败。这一步不依赖
-#      我们对根因的理解是否正确——哪怕以后 luci.mk 又换了别的变量名，
-#      只要产物版本号是 0，这里都能拦下来，不会再靠猜。
-#
-# 已知问题修复记录（2026-07-17，第四版 —— 校验脚本自己的 bug，不是
-# PKG_VERSION/PKG_PO_VERSION 修复失效）：
-# 上面第三版加的 "Verify package metadata versions" 步骤里，解析 apk
-# 包 .PKGINFO 时写的是 grep "^version = "，但已核对 Alpine apk-tools
-# 官方 apk spec 确认，.PKGINFO 里版本字段的 key 实际是 "pkgver"（例如
-# "pkgname = grub / pkgver = 2.12-r7"），根本没有 "version" 这个字段。
-# 结果 grep 永远匹配不到、VER 永远是空字符串，把 luci-i18n-turboacc-zh-cn
-# 这种版本号实际已经正确（文件名 luci-i18n-turboacc-zh-cn-26.173.86210
-# ~6909fa3.apk 已经带着真实版本号）的包，错判成"版本号异常"给拦截了。
-# 这是校验代码本身的字段名笔误，跟第三版修的 PKG_VERSION/PKG_PO_VERSION
-# 注入逻辑无关——那部分从文件名看已经生效。已把 grep 模式改成
-# "^pkgver = "。ipk 分支解析 control 文件用的 "Version:" 字段名是对的
-# （opkg/dpkg 风格 control 文件本来就用这个字段名），未改动。
-#
-# CONFIG_PACKAGE_TURBOACC_INCLUDE_* 符号前缀是字面量 TURBOACC（不是
-# luci-app-turboacc），来自 package/turboacc/luci-app-turboacc/Makefile 的
-# PKG_CONFIG_DEPENDS/LUCI_DEPENDS。该包没有独立 Config.in，子选项由
-# LUCI_DEPENDS 的 "+FOO&&BAR:baz" 条件依赖语法生成，因此这三个符号直接
-# 硬编码，不做运行时探测：
-#   CONFIG_PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING
-#   CONFIG_PACKAGE_TURBOACC_INCLUDE_BBR_CCA
-#   CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE
+# 已知坑（勿回退）：
+# 1) turboacc 目录是 cp -rf 硬拷贝进来的，不在 git 树里，
+#    导致 luci.mk 的 findrev 拿不到版本，PKG_VERSION 退化成 0。
+# 2) luci-i18n-turboacc-zh-cn 不是独立包目录，是同一个 Makefile
+#    里由 LuciTranslation 宏展开出的 Package 段，用的是独立的
+#    PKG_PO_VERSION 变量，必须和 PKG_VERSION 一起显式赋值，
+#    只写一个不会带出另一个。
+# 3) 校验步骤解析 apk 用 .PKGINFO 的 "pkgver" 字段（不是
+#    "version"），且该条目在 tar 里带 "./" 前缀，需先用
+#    tar -tzf 找到真实条目名再提取，不能假设固定路径，
+#    否则失败会被 2>/dev/null 悄悄吞掉、误判成"版本号是0"。
 
 on:
   workflow_dispatch:
@@ -121,7 +60,6 @@ env:
   TURBOACC_REPO: https://github.com/mufeng05/turboacc
 
 jobs:
-  # 根据 build_scope 生成本次实际要跑的矩阵(JSON)
   prepare-matrix:
     runs-on: ubuntu-24.04
     outputs:
@@ -223,7 +161,7 @@ jobs:
             },
             {
               "name": "bcm4908_asus_gt_ac5300",
-              "label": "ASUS GT-AC5300 (博通 BCM4908, 设备名待核实, 见 Verify device selection 步骤)",
+              "label": "ASUS GT-AC5300 (博通 BCM4908, 设备名待核实)",
               "vendor": "broadcom",
               "target": "bcm4908",
               "subtarget": "generic",
@@ -231,7 +169,7 @@ jobs:
             },
             {
               "name": "bcm53xx_netgear_r8000",
-              "label": "Netgear R8000 (博通 BCM4709, 设备名待核实, 见 Verify device selection 步骤)",
+              "label": "Netgear R8000 (博通 BCM4709, 设备名待核实)",
               "vendor": "broadcom",
               "target": "bcm53xx",
               "subtarget": "generic",
@@ -249,7 +187,7 @@ jobs:
 
           COUNT=$(echo "$MATRIX" | jq '.include | length')
           if [ "$COUNT" -eq 0 ]; then
-            echo "::error::build_scope='$SCOPE' 没有匹配到任何矩阵条目，请检查 full_matrix.json 里的 vendor 字段"
+            echo "::error::build_scope='$SCOPE' 没有匹配到任何矩阵条目"
             exit 1
           fi
 
@@ -257,14 +195,12 @@ jobs:
           echo "本次将编译 $COUNT 个平台："
           echo "$MATRIX" | jq -r '.include[] | "  - \(.label) [\(.target)/\(.subtarget)/\(.device)]"'
 
-  # 矩阵内每个平台各跑一个独立 job，互不影响
   build:
     needs: prepare-matrix
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      # all 模式下矩阵有 13 个条目，限流到 3 是速度与稳定性的折中
       max-parallel: 3
       matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
 
@@ -330,29 +266,12 @@ jobs:
         working-directory: openwrt
         run: |
           set -euxo pipefail
-          # 根因（已核对 immortalwrt/luci 官方 luci.mk 源码确认）：
-          # luci-i18n-turboacc-zh-cn 不是独立包目录，是 luci-app-turboacc/
-          # Makefile 被 luci.mk 里的 LuciTranslation 宏在同一个文件内循环
-          # 展开出的一个 Package/ 段。主包和 i18n 子包用的是两个完全独立、
-          # 互不继承的版本变量：
-          #   Package/$(PKG_NAME)                 VERSION:=...PKG_VERSION...
-          #   Package/luci-i18n-$(BASENAME)-$(1)  VERSION:=$(PKG_PO_VERSION)
-          # 两者都由 findrev 宏各自单独跑一次 git log 推导（PKG_PO_VERSION
-          # 专门对 po/ 子目录取 log，PKG_VERSION 对整个包目录取 log），
-          # 只写 PKG_VERSION 完全不会影响 PKG_PO_VERSION。
-          # 而 add_turboacc.sh 是用 cp -rf 把整个包目录硬拷贝进
-          # package/turboacc/，不在 openwrt 的 git 树里，两个变量的
-          # findrev 都拿不到 git log，各自独立退化成字面量 "0"。
-          #
-          # 所以只有一个 Makefile 需要改（不存在"遍历多个文件"的必要），
-          # 但要同时显式写入 PKG_VERSION 和 PKG_PO_VERSION 两个变量，让
-          # 主包和翻译子包的元数据版本都不再退化成 0。两者取同一个值，
-          # 语义上等价于"这个包的这次构建版本"，跟官方 luci-app-* 包
-          # 主/i18n 版本号经常一致的惯例也吻合。
+          # 主包用 PKG_VERSION、i18n 子包用 PKG_PO_VERSION，二者互不继承，
+          # 必须同时显式赋值，否则各自独立 findrev 失败退化成 0。
           MAKEFILE="package/turboacc/luci-app-turboacc/Makefile"
 
           if [ ! -f "$MAKEFILE" ]; then
-            echo "::error::$MAKEFILE 不存在，turboacc 注入结构已变化，需人工核实（包括确认 i18n 是否仍是同一文件内的宏展开，而不是独立目录）"
+            echo "::error::$MAKEFILE 不存在，turboacc 注入结构已变化"
             exit 1
           fi
 
@@ -366,7 +285,7 @@ jobs:
             rm -rf "$TMP_TURBOACC"
 
             if [ -z "$COMMIT_INFO" ]; then
-              echo "::error::无法从 turboacc 源仓库拿到 luci-app-turboacc 相关的 git log，请人工核实仓库路径是否变化"
+              echo "::error::无法从 turboacc 源仓库拿到 git log"
               exit 1
             fi
 
@@ -376,12 +295,9 @@ jobs:
             YDAY=$(date --utc --date="@${COMMIT_TS}" "+%y.%j")
             BUILD_VERSION=$(printf '%s.%05d~%s' "$YDAY" "$SECS" "$COMMIT_HASH")
 
-            # 插入位置必须在 Makefile 里 include luci.mk 之前（PKG_NAME 行
-            # 紧随其后是 luci-app-* Makefile 的通行写法），因为 luci.mk 里
-            # PKG_VERSION / PKG_PO_VERSION 都是 ?= 条件赋值，只有我们的
-            # 显式赋值先执行，luci.mk 里的 findrev 才不会覆盖它。
+            # 须在 luci.mk 的 ?= 条件赋值之前生效，故插在 PKG_NAME 行后
             sed -i "/^PKG_NAME:=/a PKG_VERSION:=${BUILD_VERSION}\nPKG_PO_VERSION:=${BUILD_VERSION}\nPKG_RELEASE:=1" "$MAKEFILE"
-            echo "已注入 PKG_VERSION:=${BUILD_VERSION} / PKG_PO_VERSION:=${BUILD_VERSION} / PKG_RELEASE:=1（主包与翻译子包同时生效，与 turboacc 源仓库真实 commit 绑定）"
+            echo "已注入 PKG_VERSION:=${BUILD_VERSION} / PKG_PO_VERSION:=${BUILD_VERSION} / PKG_RELEASE:=1"
           fi
 
           echo "=== 修补后的 Makefile 头部 ==="
@@ -391,8 +307,7 @@ jobs:
         working-directory: openwrt
         run: |
           set -euxo pipefail
-          # add_turboacc.sh exit 0 不代表真的注入成功(内核版本超出其白名单时
-          # 可能静默不做任何事)，这里直接校验源码树，避免几十分钟后才发现。
+          # add_turboacc.sh exit 0 不代表注入成功（内核版本超出白名单会静默跳过）
           FOUND=$(find package -maxdepth 3 -type d \( \
             -iname "*turboacc*" -o \
             -iname "*shortcut-fe*" -o \
@@ -401,29 +316,23 @@ jobs:
           \) 2>/dev/null || true)
 
           if [ -z "$FOUND" ]; then
-            echo "::error::add_turboacc.sh 执行后未在 package/ 目录下找到相关目录，注入大概率未生效(常见原因：内核版本不在白名单 6.6/6.12/6.18 内，或上游脚本已变更)"
+            echo "::error::未找到 turboacc 相关目录，注入大概率未生效(内核版本不在白名单 6.6/6.12/6.18 内，或上游脚本已变更)"
             exit 1
           fi
 
           echo "检测到以下 turboacc 相关源码目录已注入："
           echo "$FOUND"
 
-          echo ""
-          echo "=== luci-app-turboacc/Makefile 的 PKG_VERSION / PKG_PO_VERSION（应全部非 0/非空，二者都要检查——主包读 PKG_VERSION，i18n 子包读 PKG_PO_VERSION，是两个独立变量）==="
           MK="package/turboacc/luci-app-turboacc/Makefile"
-          if [ ! -f "$MK" ]; then
-            echo "::error::${MK} 不存在，Fix 步骤理应已在此之前失败退出，这里属于二次防线"
-            exit 1
-          fi
           VER=$(grep "^PKG_VERSION:=" "$MK" | head -n1 | cut -d'=' -f2 | tr -d ' \t')
           PO_VER=$(grep "^PKG_PO_VERSION:=" "$MK" | head -n1 | cut -d'=' -f2 | tr -d ' \t')
-          echo "  PKG_VERSION=${VER:-<未设置>}  PKG_PO_VERSION=${PO_VER:-<未设置>}"
+          echo "PKG_VERSION=${VER:-<未设置>}  PKG_PO_VERSION=${PO_VER:-<未设置>}"
           if [ -z "$VER" ] || [ "$VER" = "0" ]; then
-            echo "::error::PKG_VERSION 缺失或为 0，主包 luci-app-turboacc 的元数据版本会有问题"
+            echo "::error::PKG_VERSION 缺失或为 0"
             exit 1
           fi
           if [ -z "$PO_VER" ] || [ "$PO_VER" = "0" ]; then
-            echo "::error::PKG_PO_VERSION 缺失或为 0，翻译子包 luci-i18n-turboacc-zh-cn 的元数据版本会有问题（这正是之前两次都漏掉的地方）"
+            echo "::error::PKG_PO_VERSION 缺失或为 0"
             exit 1
           fi
 
@@ -431,17 +340,15 @@ jobs:
         working-directory: openwrt
         run: |
           set -euxo pipefail
-          # 打印这次真实注入的 Makefile 原文，供人工核对符号名是否随上游变化
           MAKEFILE=$(find package/turboacc -maxdepth 2 -iname "Makefile" -path "*luci-app-turboacc*" | head -n1 || true)
 
-          echo "=== PKG_CONFIG_DEPENDS ==="
           if [ -n "$MAKEFILE" ]; then
-            echo "文件路径: $MAKEFILE"
-            grep -A 20 "PKG_CONFIG_DEPENDS" "$MAKEFILE" || echo "(未找到 PKG_CONFIG_DEPENDS 段)"
+            echo "=== PKG_CONFIG_DEPENDS ==="
+            grep -A 20 "PKG_CONFIG_DEPENDS" "$MAKEFILE" || echo "(未找到)"
             echo "=== LUCI_DEPENDS ==="
-            grep -A 10 "LUCI_DEPENDS" "$MAKEFILE" || echo "(未找到 LUCI_DEPENDS 段)"
+            grep -A 10 "LUCI_DEPENDS" "$MAKEFILE" || echo "(未找到)"
           else
-            echo "::error::未找到 luci-app-turboacc 的 Makefile，注入结构已变化，需人工核实 .config 中硬编码的符号是否仍适用"
+            echo "::error::未找到 luci-app-turboacc 的 Makefile，注入结构已变化"
             exit 1
           fi
 
@@ -449,8 +356,8 @@ jobs:
         working-directory: openwrt
         run: |
           set -euxo pipefail
-          # target/subtarget/device 原样小写使用(可能含连字符如 rpi-4/dl-wrx36)，
-          # 不能转大写/转下划线，否则生成的符号不存在，make defconfig 会静默丢弃
+          # target/subtarget/device 原样小写(可能含连字符如 rpi-4)，
+          # 转大写/转下划线会导致符号不存在、被 defconfig 静默丢弃
           {
             echo "CONFIG_TARGET_${{ matrix.target }}=y"
             echo "CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}=y"
@@ -473,25 +380,23 @@ jobs:
         run: |
           set -euxo pipefail
           if ! grep -q "^CONFIG_TARGET_${{ matrix.target }}_${{ matrix.subtarget }}_DEVICE_${{ matrix.device }}=y" .config; then
-            echo "::error::设备选择项未生效，请核实 target/subtarget/device 组合是否存在(可用 make menuconfig 搜索确认)"
+            echo "::error::设备选择项未生效，请核实 target/subtarget/device 组合是否存在"
             exit 1
           fi
-
           if ! grep -q "^CONFIG_PACKAGE_luci-app-turboacc=m" .config; then
-            echo "::error::CONFIG_PACKAGE_luci-app-turboacc=m 未生效，请检查 Verify turboacc injection 输出及当前内核版本/分支下的 Kconfig 依赖"
+            echo "::error::CONFIG_PACKAGE_luci-app-turboacc=m 未生效"
             exit 1
           fi
-
           if ! grep -q "^CONFIG_PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING=y" .config; then
-            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING=y 未生效，请查看 Discover 步骤输出核实符号是否仍存在"
+            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_FLOW_OFFLOADING=y 未生效"
             exit 1
           fi
           if ! grep -q "^CONFIG_PACKAGE_TURBOACC_INCLUDE_BBR_CCA=y" .config; then
-            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_BBR_CCA=y 未生效，请查看 Discover 步骤输出核实符号是否仍存在"
+            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_BBR_CCA=y 未生效"
             exit 1
           fi
           if ! grep -q "^CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE=y" .config; then
-            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE=y 未生效，请查看 Discover 步骤输出核实符号是否仍存在"
+            echo "::error::CONFIG_PACKAGE_TURBOACC_INCLUDE_FULLCONE=y 未生效"
             exit 1
           fi
 
@@ -525,12 +430,7 @@ jobs:
 
           cp -a openwrt/bin/targets/*/* artifact/targets/ 2>/dev/null || true
 
-          # 只收集 luci-app-turboacc / luci-i18n-turboacc-zh-cn 两个真正的
-          # 第三方产物本身；其依赖的标准 kmod 由官方软件源提供，不打包分发。
-          #
-          # 重要：不对产物文件名做任何"规范化"重命名，原样保留 openwrt 编译
-          # 产出的版本化文件名。apk 包命名规范是连字符（包名-版本-rN.apk），
-          # ipk 是下划线（包名_版本-rN_架构.ipk），二者不可混用、不可互转。
+          # 不重命名，原样保留 apk(连字符)/ipk(下划线) 命名
           find openwrt/bin/packages openwrt/bin/targets -type f \( \
             -iname "luci-app-turboacc-*.apk" -o \
             -iname "luci-app-turboacc_*.ipk" -o \
@@ -544,33 +444,41 @@ jobs:
       - name: Verify package metadata versions (not just filenames)
         run: |
           set -euxo pipefail
-          # 之前的教训：只检查文件"是否存在"，没检查包内元数据 version
-          # 字段是否为 0——文件名里带版本号不代表包内 apk/ipk 元数据版本号
-          # 正确，两者是分开的信息源，apk index 校验用的是元数据。
-          # 这里对 artifact/packages 下每一个包，真正解析其内部版本字段。
-          #
-          # 字段名更正（2026-07-17）：.PKGINFO 里版本字段的 key 是
-          # "pkgver"，不是 "version"（已核对 Alpine apk-tools 官方 apk
-          # spec 文档确认，例如: "pkgname = grub / pkgver = 2.12-r7 /
-          # pkgdesc = ..."）。上一版写成了 grep "^version = "，这个字段
-          # 在 .PKGINFO 里根本不存在，导致 grep 永远匹配不到、VER 永远
-          # 为空，把本来版本号正确的包错判成异常并拦截构建——是校验脚本
-          # 自己的 bug，不是 PKG_VERSION/PKG_PO_VERSION 修复失效。
+          # 文件名带版本号不代表包内元数据 version 字段也正确。
+          # apk 的 .PKGINFO 用字段名 "pkgver"，且条目名带 "./" 前缀，
+          # 必须先 tar -tzf 找到真实条目名再提取，不能假设固定路径，
+          # 否则提取失败会被静默吞掉、误判成"版本号是0"。ipk 同理。
           FAIL=0
           for PKG in artifact/packages/*; do
             [ -e "$PKG" ] || continue
+            VER=""
             case "$PKG" in
               *.apk)
-                # apk 包是拼接的多段 gzip 归档，control 段里的 .PKGINFO
-                # 用 "pkgver = X" 记录版本（不是 "version ="）
-                VER=$(tar -xzOf "$PKG" .PKGINFO 2>/dev/null | grep "^pkgver = " | cut -d' ' -f3 || true)
+                ENTRY=$(tar -tzf "$PKG" 2>/dev/null | grep -E '(^|/)\.PKGINFO$' | head -n1 || true)
+                if [ -z "$ENTRY" ]; then
+                  echo "::error::${PKG} 找不到 .PKGINFO 成员，apk 结构可能已变化"
+                  FAIL=1
+                  continue
+                fi
+                VER=$(tar -xzOf "$PKG" "$ENTRY" 2>/dev/null | grep "^pkgver = " | cut -d' ' -f3 || true)
                 ;;
               *.ipk)
-                # ipk 是 ar 归档，control.tar.gz 里的 control 文件含 Version 字段
                 TMPD=$(mktemp -d)
                 ar x "$PKG" --output="$TMPD" control.tar.gz 2>/dev/null || true
                 if [ -f "$TMPD/control.tar.gz" ]; then
-                  VER=$(tar -xzOf "$TMPD/control.tar.gz" ./control 2>/dev/null | grep "^Version:" | awk '{print $2}' || true)
+                  CTL_ENTRY=$(tar -tzf "$TMPD/control.tar.gz" 2>/dev/null | grep -E '(^|/)control$' | head -n1 || true)
+                  if [ -z "$CTL_ENTRY" ]; then
+                    echo "::error::${PKG} 找不到 control 成员，ipk 结构可能已变化"
+                    rm -rf "$TMPD"
+                    FAIL=1
+                    continue
+                  fi
+                  VER=$(tar -xzOf "$TMPD/control.tar.gz" "$CTL_ENTRY" 2>/dev/null | grep "^Version:" | awk '{print $2}' || true)
+                else
+                  echo "::error::${PKG} 里没有 control.tar.gz，ipk 结构可能已变化"
+                  rm -rf "$TMPD"
+                  FAIL=1
+                  continue
                 fi
                 rm -rf "$TMPD"
                 ;;
@@ -580,22 +488,21 @@ jobs:
             esac
 
             if [ -z "$VER" ] || [ "$VER" = "0" ] || [[ "$VER" == 0-* ]]; then
-              echo "::error::${PKG} 包内元数据版本号是 '${VER:-<空>}'，PKG_VERSION 修补没有对这个包生效"
+              echo "::error::${PKG} 包内元数据版本号是 '${VER:-<空>}'"
               FAIL=1
             else
-              echo "[OK] $(basename "$PKG") -> 元数据 version = ${VER}"
+              echo "[OK] $(basename "$PKG") -> version = ${VER}"
             fi
           done
 
           if [ "$FAIL" -ne 0 ]; then
-            echo "::error::存在版本号异常的包，构建判定失败（宁可现在失败，也不要产出一个装不上的包）"
+            echo "::error::存在版本号异常的包，构建判定失败"
             exit 1
           fi
 
       - name: Verify turboacc packages exist
         run: |
           set -euxo pipefail
-          # 按各自命名规范查找：apk 连字符、ipk 下划线，不混用通配符
           MAIN_PKG=$(find artifact/packages -maxdepth 1 -type f \( \
             -iname "luci-app-turboacc-*.apk" -o \
             -iname "luci-app-turboacc_*.ipk" \
@@ -607,7 +514,7 @@ jobs:
           \) | head -n1 || true)
 
           if [ -z "$MAIN_PKG" ] || [ -z "$I18N_PKG" ]; then
-            echo "::error::没找到主包(luci-app-turboacc)或中文包(luci-i18n-turboacc-zh-cn)，构建产物不完整"
+            echo "::error::没找到主包或中文包，构建产物不完整"
             ls -lh artifact/packages/ || true
             exit 1
           fi
@@ -615,9 +522,7 @@ jobs:
           echo "已找到主包: $MAIN_PKG"
           echo "已找到中文包: $I18N_PKG"
           echo ""
-          echo "安装方式：把这两个文件传到路由器同一目录，路由器需能访问"
-          echo "ImmortalWrt 官方软件源以自动解析 kmod-nft-offload/kmod-tcp-bbr/"
-          echo "kmod-nft-fullcone 等依赖："
+          echo "安装方式(路由器需能访问官方源以解析依赖)："
           echo "  apk 分支: apk add --allow-untrusted ./luci-app-turboacc-*.apk ./luci-i18n-turboacc-zh-cn-*.apk"
           echo "  opkg 分支: opkg install ./luci-app-turboacc_*.ipk ./luci-i18n-turboacc-zh-cn_*.ipk"
 
