@@ -16,7 +16,21 @@ name: Build ImmortalWrt Multi-Target TurboACC Packages
 # 需等待上游脚本更新。
 #
 # 包命名：openwrt-25.12 起默认用 apk（包名-版本.apk，连字符），旧分支用
-# ipk（包名_版本_架构.ipk，下划线）。下游查找逻辑需同时兼容两种命名。
+# ipk（包名_版本_架构.ipk，下划线）。下游查找逻辑需同时兼容两种命名，
+# 且严禁把两种命名规则搞混——本 workflow 不再对产物文件名做任何"规范化"
+# 重命名，原样保留 openwrt 编译产出的版本化文件名。
+#
+# 已知问题修复记录（2026-07-17）：
+# mufeng05/turboacc 仓库 custom/luci-app-turboacc/Makefile 没有定义
+# PKG_VERSION，而它 include 的 feeds/luci/luci.mk 依赖 git log 自动推导
+# 版本号；但 add_turboacc.sh 是用 cp -rf 把文件硬拷贝进 package/turboacc/
+# 目录，该目录不在 git 仓库里，导致版本推导失败、退化成 "0"。这会让打出
+# 来的 apk 包内部元数据 version 字段固定为 0，即便文件名本身带正确版本号
+# 也无法通过 ImageBuilder 的本地 apk 索引校验（因为 apk index 读的是包内
+# 元数据，不是文件名），报错类似：
+#   ERROR: luci-app-turboacc-0: package mentioned in index not found
+# 已通过新增 "Fix turboacc PKG_VERSION" 步骤解决：在注入后立即给 Makefile
+# 手动补上 PKG_VERSION / PKG_RELEASE。
 #
 # CONFIG_PACKAGE_TURBOACC_INCLUDE_* 符号前缀是字面量 TURBOACC（不是
 # luci-app-turboacc），来自 package/turboacc/luci-app-turboacc/Makefile 的
@@ -270,6 +284,59 @@ jobs:
           curl -fsSL --retry 3 "${{ env.TURBOACC_SCRIPT }}" -o add_turboacc.sh
           bash add_turboacc.sh
 
+      - name: Fix turboacc PKG_VERSION
+        working-directory: openwrt
+        run: |
+          set -euxo pipefail
+          # 根因：mufeng05/turboacc 的 custom/luci-app-turboacc/Makefile 没有
+          # 定义 PKG_VERSION，它 include 的 feeds/luci/luci.mk 里的 findrev
+          # 宏依赖 git log 自动推导版本号（格式 YY.DDD.SSSSS~hash，即两位年份.
+          # 一年中第几天.当天秒数~短commit hash，本次构建里所有官方 luci-app-*
+          # 包用的都是这个格式）；但 add_turboacc.sh 是把文件硬拷贝进
+          # package/turboacc/ 目录，该目录不在任何 git 仓库里，git log 失败后
+          # findrev 逐级 fallback，最终退化成字面量 "0"。这会让打出来的 apk
+          # 包内部元数据 version 字段固定是 0，即使文件名带正确版本号也无法
+          # 通过 ImageBuilder 本地 apk 索引校验，因为 apk index 读的是包内
+          # 元数据（ADB info 块），不是文件名。
+          #
+          # 修复思路：单独浅克隆一份 turboacc 源仓库，取其真实 git 提交时间戳
+          # 与短 hash，按 luci.mk 里 findrev 完全相同的公式手工算出版本号，
+          # 让 turboacc 的版本号风格与同批次其他官方 luci-app-* 包保持一致，
+          # 而不是用一个跟 luci 惯例不搭边的日期或纯 hash。
+          MAKEFILE="package/turboacc/luci-app-turboacc/Makefile"
+
+          if [ ! -f "$MAKEFILE" ]; then
+            echo "::error::$MAKEFILE 不存在，turboacc 注入结构已变化，需人工核实"
+            exit 1
+          fi
+
+          if grep -q "^PKG_VERSION:=" "$MAKEFILE"; then
+            echo "PKG_VERSION 已存在，跳过修补"
+          else
+            TMP_TURBOACC=$(mktemp -d)
+            git clone --depth=50 --single-branch https://github.com/mufeng05/turboacc "$TMP_TURBOACC"
+
+            COMMIT_INFO=$(git -C "$TMP_TURBOACC" log -1 --format="%ct %h" --abbrev=7 -- custom/luci-app-turboacc lede/luci-app-turboacc)
+            rm -rf "$TMP_TURBOACC"
+
+            if [ -z "$COMMIT_INFO" ]; then
+              echo "::error::无法从 turboacc 源仓库拿到 luci-app-turboacc 相关的 git log，请人工核实仓库路径是否变化"
+              exit 1
+            fi
+
+            COMMIT_TS=$(echo "$COMMIT_INFO" | cut -d' ' -f1)
+            COMMIT_HASH=$(echo "$COMMIT_INFO" | cut -d' ' -f2)
+            SECS=$(( COMMIT_TS % 86400 ))
+            YDAY=$(date --utc --date="@${COMMIT_TS}" "+%y.%j")
+            BUILD_VERSION=$(printf '%s.%05d~%s' "$YDAY" "$SECS" "$COMMIT_HASH")
+
+            sed -i "/^PKG_NAME:=luci-app-turboacc/a PKG_VERSION:=${BUILD_VERSION}\nPKG_RELEASE:=1" "$MAKEFILE"
+            echo "已注入 PKG_VERSION:=${BUILD_VERSION} / PKG_RELEASE:=1（与官方 luci-app-* 包版本号格式一致，且与 turboacc 源仓库真实 commit 绑定）"
+          fi
+
+          echo "=== 修补后的 Makefile 头部 ==="
+          head -n 10 "$MAKEFILE"
+
       - name: Verify turboacc injection
         working-directory: openwrt
         run: |
@@ -391,31 +458,36 @@ jobs:
 
           # 只收集 luci-app-turboacc / luci-i18n-turboacc-zh-cn 两个真正的
           # 第三方产物本身；其依赖的标准 kmod 由官方软件源提供，不打包分发。
+          #
+          # 重要：不对产物文件名做任何"规范化"重命名，原样保留 openwrt 编译
+          # 产出的版本化文件名。apk 包命名规范是连字符（包名-版本-rN.apk），
+          # ipk 是下划线（包名_版本-rN_架构.ipk），二者不可混用、不可互转。
+          # 之前把文件名固定改成 luci-app-turboacc.apk 这种无版本号命名，
+          # 会导致下游 ImageBuilder 场景下产物文件名与后续处理逻辑的预期
+          # 不一致，增加排错难度——版本号该在文件名里的必须保留。
           find openwrt/bin/packages openwrt/bin/targets -type f \( \
-            -iname "luci-app-turboacc[-_]*" -o \
-            -iname "luci-i18n-turboacc-zh-cn[-_]*" \
+            -iname "luci-app-turboacc-*.apk" -o \
+            -iname "luci-app-turboacc_*.ipk" -o \
+            -iname "luci-i18n-turboacc-zh-cn-*.apk" -o \
+            -iname "luci-i18n-turboacc-zh-cn_*.ipk" \
           \) -exec cp -f {} artifact/packages/ \;
 
-          # upstream 版本号写法不稳定(出现过无正经版本号的命名)，规范化改名
-          # 成固定文件名。不影响安装：apk/ipk 靠包内 metadata 识别，不看文件名。
-          for CANON_NAME in "luci-app-turboacc" "luci-i18n-turboacc-zh-cn"; do
-            SRC=$(find artifact/packages -maxdepth 1 -type f -iname "${CANON_NAME}[-_]*" | head -n1 || true)
-            if [ -n "$SRC" ]; then
-              EXT="${SRC##*.}"
-              mv -f "$SRC" "artifact/packages/${CANON_NAME}.${EXT}"
-              echo "已规范化改名: $SRC -> artifact/packages/${CANON_NAME}.${EXT}"
-            else
-              echo "::warning::未找到 ${CANON_NAME} 对应的产物文件"
-            fi
-          done
-
+          echo "=== artifact/packages 内容 ==="
           find artifact -type f | sort
 
       - name: Verify turboacc packages exist
         run: |
           set -euxo pipefail
-          MAIN_PKG=$(find artifact/packages -maxdepth 1 -type f -iname "luci-app-turboacc.*" | head -n1 || true)
-          I18N_PKG=$(find artifact/packages -maxdepth 1 -type f -iname "luci-i18n-turboacc-zh-cn.*" | head -n1 || true)
+          # 按各自命名规范查找：apk 连字符、ipk 下划线，不混用通配符
+          MAIN_PKG=$(find artifact/packages -maxdepth 1 -type f \( \
+            -iname "luci-app-turboacc-*.apk" -o \
+            -iname "luci-app-turboacc_*.ipk" \
+          \) | head -n1 || true)
+
+          I18N_PKG=$(find artifact/packages -maxdepth 1 -type f \( \
+            -iname "luci-i18n-turboacc-zh-cn-*.apk" -o \
+            -iname "luci-i18n-turboacc-zh-cn_*.ipk" \
+          \) | head -n1 || true)
 
           if [ -z "$MAIN_PKG" ] || [ -z "$I18N_PKG" ]; then
             echo "::error::没找到主包(luci-app-turboacc)或中文包(luci-i18n-turboacc-zh-cn)，构建产物不完整"
@@ -429,8 +501,8 @@ jobs:
           echo "安装方式：把这两个文件传到路由器同一目录，路由器需能访问"
           echo "ImmortalWrt 官方软件源以自动解析 kmod-nft-offload/kmod-tcp-bbr/"
           echo "kmod-nft-fullcone 等依赖："
-          echo "  apk 分支: apk add --allow-untrusted ./luci-app-turboacc.apk ./luci-i18n-turboacc-zh-cn.apk"
-          echo "  opkg 分支: opkg install ./luci-app-turboacc*.ipk ./luci-i18n-turboacc-zh-cn*.ipk"
+          echo "  apk 分支: apk add --allow-untrusted ./luci-app-turboacc-*.apk ./luci-i18n-turboacc-zh-cn-*.apk"
+          echo "  opkg 分支: opkg install ./luci-app-turboacc_*.ipk ./luci-i18n-turboacc-zh-cn_*.ipk"
 
       - name: Package as zip
         run: |
