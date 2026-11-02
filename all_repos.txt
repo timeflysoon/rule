@@ -1,4 +1,4 @@
-timeflysoon (64, 私有2)                        88alt (64, 私有2)
+timeflysoon (63, 私有1)                        88alt (63, 私有1)
 -------------------------------------------  -------------------------------------
 timeflysoon/2FAGuard                         88alt/2FAGuard
 timeflysoon/3x-ui                            88alt/3x-ui
@@ -34,10 +34,9 @@ timeflysoon/Microsoft-Activation-Scripts     88alt/Microsoft-Activation-Scripts
 timeflysoon/MikroTikPatch                    88alt/MikroTikPatch
 timeflysoon/MusicFree                        88alt/MusicFree
 timeflysoon/Nrfr                             88alt/Nrfr
-timeflysoon/Open-Box (private)               88alt/Open-Box (private)
+timeflysoon/Open-Box                         88alt/Open-Box
 timeflysoon/OpenBackRestore                  88alt/OpenBackRestore
 timeflysoon/OpenClash                        88alt/OpenClash
-timeflysoon/OpenWrtAction                    88alt/OpenWrtAction
 timeflysoon/Prism-Browser-Community          88alt/Prism-Browser-Community
 timeflysoon/Prism-Browser-Free (private)     88alt/Prism-Browser-Free (private)
 timeflysoon/PVE-manager-status               88alt/PVE-manager-status
