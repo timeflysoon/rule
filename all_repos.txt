@@ -10,7 +10,6 @@ timeflysoon/clash-rules                      88alt/clash-rules
 timeflysoon/ClashMetaForAndroid              88alt/ClashMetaForAndroid
 timeflysoon/Cloudflare-Navihive              88alt/Cloudflare-Navihive
 timeflysoon/CloudflareSpeedTest              88alt/CloudflareSpeedTest
-timeflysoon/CloudRunFilesBuilder             88alt/CloudRunFilesBuilder
 timeflysoon/CloudSaver                       88alt/CloudSaver
 timeflysoon/CLX-S20P                         88alt/CLX-S20P
 timeflysoon/dae                              88alt/dae
@@ -43,6 +42,7 @@ timeflysoon/PVE-manager-status               88alt/PVE-manager-status
 timeflysoon/quickstart                       88alt/quickstart
 timeflysoon/realtek-r8125-dkms               88alt/realtek-r8125-dkms
 timeflysoon/rule                             88alt/rule
+timeflysoon/RunFilesBuilder                  88alt/RunFilesBuilder
 timeflysoon/sdmaid-se                        88alt/sdmaid-se
 timeflysoon/singbox_ruleset                  88alt/singbox_ruleset
 timeflysoon/small                            88alt/small
